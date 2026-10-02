@@ -1244,8 +1244,7 @@ function render(){
       if (editMode) {
         html += `<td>${textFieldHtml('Composition_delegation', rec.Composition_delegation)}</td>`;
         html += `<td>${refListConfigs.Participation_souhaitee.isRefList ? refListFieldHtml('Participation_souhaitee', rec) : textFieldHtml('Participation_souhaitee', rec.Participation_souhaitee)}</td>`;
-        //html += `<td>${textFieldHtml('Participants_designes', rec.Participants_designes)}</td>`;
-		html += `<td>${refListConfigs.Participants_designes.isRefList ? refListFieldHtml('Participants_designes', rec) : textFieldHtml('Participants_designes', rec.Participants_designes)} <br/> ${textFieldHtml('Autres_participants', rec.Autres_participants)}</td>`;
+    html += `<td>${refListConfigs.Participants_designes.isRefList ? refListFieldHtml('Participants_designes', rec) : textFieldHtml('Participants_designes', rec.Participants_designes)}<div style="margin-top:4px">${textFieldHtml('Autres_participants', rec.Autres_participants)}</div></td>`;
         
 	  } else {
         html += `<td>${staticFieldHtml(rec.Composition_delegation)}</td>`;
@@ -1483,7 +1482,7 @@ function openFiche(rowId, keepDraft){
   body += fieldRowHtml('Intitulé', `<textarea class="fiche-field-input" data-col="Intitule" rows="2">${escapeHtml(rec.Intitule)}</textarea>`);
 
   // Zone "Participation"
-  body += `<div class="fiche-section"><div class="fiche-section-title">Participation</div>`;
+  body += `<div class="fiche-section section"><div class="fiche-section-title">Participation</div>`;
   body += `<div class="fiche-row3">`;
   body += fieldRowHtml('Composition de la délégation', `<textarea class="fiche-field-input" data-col="Composition_delegation" rows="2">${escapeHtml(rec.Composition_delegation)}</textarea>`);
   body += fieldRowHtml('Participation souhaitée (services)', refListConfigs.Participation_souhaitee.isRefList ? refListFieldHtml('Participation_souhaitee', rec) : `<textarea class="fiche-field-input" data-col="Participation_souhaitee" rows="2">${escapeHtml(rec.Participation_souhaitee)}</textarea>`);
