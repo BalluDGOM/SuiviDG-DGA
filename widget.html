@@ -1,0 +1,2216 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Suivi DG / DGA</title>
+<script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+<style>
+  :root{
+    --bleu-france:      #000091;
+    --bleu-france-hover:#1212ff;
+    --gris-fond:        #f6f6f6;
+    --gris-ligne-alt:   #f0f0f0;
+    --gris-bordure:     #ddd;
+    --texte:            #1e1e1e;
+    --texte-clair:      #666;
+    --vert-recu:        #18753c;
+    --rouge-passe:      #b34000;
+  }
+  *{box-sizing:border-box;}
+  html,body{
+    margin:0;padding:0;height:100%;
+    font-family:Marianne,"Segoe UI",Arial,sans-serif;
+    background:var(--gris-fond);
+    color:var(--texte);
+    font-size:14px;
+  }
+  #app{display:flex;flex-direction:column;height:100vh;}
+
+  /* Barre supérieure */
+  #topbar{
+    display:flex;align-items:center;gap:14px;
+    padding:10px 16px;
+    background:#fff;
+    border-bottom:2px solid var(--bleu-france);
+    flex-wrap:wrap;
+  }
+  #topbar .titre{
+    font-weight:700;color:var(--bleu-france);
+    margin-right:auto;font-size:15px;letter-spacing:.02em;
+  }
+  .switch-wrap{display:flex;align-items:center;gap:8px;}
+  .switch{
+    position:relative;width:42px;height:24px;
+    background:#c9c9c9;border-radius:999px;cursor:pointer;
+    transition:background .15s ease;flex:none;
+  }
+  .switch.on{background:var(--bleu-france);}
+  .switch .knob{
+    position:absolute;top:2px;left:2px;width:20px;height:20px;
+    background:#fff;border-radius:50%;
+    transition:left .15s ease;
+    box-shadow:0 1px 2px rgba(0,0,0,.35);
+  }
+  .switch.on .knob{left:20px;}
+  .switch-label{cursor:pointer;user-select:none;font-size:13px;}
+  #count-masques{font-size:12px;color:var(--texte-clair);font-style:italic;}
+  #statut{font-size:12px;color:var(--texte-clair);}
+  #statut.err{color:var(--rouge-passe);font-weight:600;}
+
+  /* Table */
+  #table-wrap{flex:1;overflow:auto;}
+  table{border-collapse:collapse;width:100%;min-width:1400px;}
+  thead th{
+    position:sticky;top:0;z-index:32;
+    background:var(--bleu-france);color:#fff;
+    text-align:left;padding:8px 10px;
+    font-size:12px;letter-spacing:.03em;text-transform:uppercase;
+    white-space:nowrap;
+    border:none;
+    box-shadow:inset 0 0 0 1px var(--gris-bordure);
+  }
+  thead tr:nth-child(1) th{
+    top:0;
+    z-index:34;
+    text-align:center;
+  }
+  thead tr:nth-child(2) th{
+    top:33px; /* sous la ligne des chapeaux */
+    z-index:33;
+    text-align:center;
+    font-weight:600;
+    text-transform:none;
+    letter-spacing:normal;
+  }
+  thead tr:nth-child(3) th{
+    top:66px; /* sous la ligne des chapeaux + la ligne des responsables */
+    white-space:normal;
+    word-break:break-word;
+    line-height:1.25;
+    text-transform:none;
+  }
+
+  /* Colonnes figées (Créneau + Nature du RDV) pour garder un repère
+     visuel lors du défilement horizontal sur petit écran */
+  .freeze-col{ position:sticky; left:0; }
+  thead tr:nth-child(1) th.freeze-col{ z-index:44; }
+  thead tr:nth-child(2) th.freeze-col{ z-index:43; }
+  thead tr:nth-child(3) th.freeze-col{ z-index:42; }
+  tbody td.freeze-col{ z-index:5; background:#fff; }
+  tbody tr:nth-child(even) td.freeze-col{ background:var(--gris-ligne-alt); }
+  .freeze-edge{ box-shadow:2px 0 4px -2px rgba(0,0,0,.35); }
+  /* Combine la bordure d'en-tête (box-shadow inset) avec l'ombre de bord
+     figé : les deux sont portées par la propriété box-shadow, donc l'une
+     écraserait l'autre si on ne les fusionnait pas explicitement ici. */
+  thead th.freeze-edge{ box-shadow:inset 0 0 0 1px var(--gris-bordure), 2px 0 4px -2px rgba(0,0,0,.35); }
+
+  /* Bouton de repli/dépli d'un bloc de colonnes (chapeau) */
+  .grp-toggle{
+    border:1px solid rgba(255,255,255,.6);background:rgba(255,255,255,.15);
+    color:inherit;border-radius:3px;font-size:11px;line-height:1;
+    padding:2px 5px;cursor:pointer;margin-left:6px;vertical-align:middle;
+  }
+  .grp-toggle:hover{background:rgba(255,255,255,.35);}
+  th.th-nature-header .grp-toggle, th.th-dossier-header .grp-toggle, th.th-participation-header .grp-toggle{
+    border-color:rgba(0,0,0,.25);background:rgba(255,255,255,.35);
+  }
+  td.grp-collapsed-cell{
+    text-align:center;color:var(--texte-clair);font-style:italic;cursor:pointer;
+  }
+  th.grp-collapsed-head{cursor:pointer;}
+
+  /* Bouton "voir en fiche" */
+  .fiche-btn{
+    width:24px;height:24px;border-radius:4px;
+    border:1px solid transparent;background:transparent;
+    color:var(--bleu-france);font-size:13px;line-height:1;
+    cursor:pointer;
+    display:inline-flex;align-items:center;justify-content:center;
+    transition:background .15s ease, border-color .15s ease;
+  }
+  .fiche-btn:hover{background:#e8e8fb;border-color:#c7c7f5;}
+
+  /* Modale "fiche" */
+  #fiche-overlay{
+    position:fixed;inset:0;background:rgba(0,0,0,.4);
+    display:flex;align-items:flex-start;justify-content:center;
+    padding:24px 12px;z-index:100;overflow:auto;
+  }
+  #fiche-overlay.hidden{display:none;}
+  #fiche-card{
+    background:#fff;border-radius:8px;max-width:920px;width:100%;
+    box-shadow:0 10px 30px rgba(0,0,0,.3);
+  }
+  #fiche-card header{
+    display:flex;align-items:center;justify-content:space-between;
+    padding:14px 18px;border-bottom:2px solid var(--bleu-france);
+  }
+  #fiche-card header h2{margin:0;font-size:15px;color:var(--bleu-france);}
+  #fiche-card .fiche-close{
+    border:none;background:transparent;font-size:18px;line-height:1;
+    cursor:pointer;color:var(--texte-clair);padding:4px 8px;
+  }
+  #fiche-card footer{
+    display:flex;align-items:center;gap:10px;padding:12px 18px;
+    border-top:1px solid var(--gris-bordure);background:#fff;
+    position:sticky;bottom:0;border-radius:0 0 8px 8px;
+  }
+  .fiche-footer-msg{margin-right:auto;font-size:12px;display:flex;flex-direction:column;gap:2px;}
+  #fiche-dirty{color:var(--rouge-passe);font-weight:600;}
+  #fiche-error{color:#c62828;font-weight:600;}
+  .fiche-cancel, .fiche-validate{
+    border-radius:4px;padding:7px 16px;font:inherit;font-size:13px;cursor:pointer;
+    border:1px solid var(--bleu-france);
+  }
+  .fiche-cancel{background:#fff;color:var(--bleu-france);}
+  .fiche-cancel:hover{background:#e8e8fb;}
+  .fiche-validate{background:var(--bleu-france);color:#fff;font-weight:600;}
+  .fiche-validate:hover{background:var(--bleu-france-hover);}
+  .fiche-validate:disabled{opacity:.6;cursor:wait;}
+  .fiche-header-actions{display:flex;align-items:center;gap:8px;}
+  .fiche-print{
+    border:1px solid var(--bleu-france);background:#fff;color:var(--bleu-france);
+    border-radius:4px;padding:5px 12px;font:inherit;font-size:13px;cursor:pointer;
+  }
+  .fiche-print:hover{background:var(--bleu-france);color:#fff;}
+  .static-autres{padding-top:2px;color:var(--texte);}
+
+  #fiche-body{padding:14px 18px;display:grid;gap:12px;}
+  .fiche-field{display:flex;flex-direction:column;gap:3px;}
+  .fiche-field label{
+    font-size:11px;letter-spacing:.03em;
+    color:var(--texte-clair);font-weight:600;
+  }
+  .fiche-field .fiche-input-wrap textarea,
+  .fiche-field .fiche-input-wrap select,
+  .fiche-field .fiche-input-wrap input{
+    border:1px solid var(--gris-bordure);border-radius:4px;padding:6px 8px;
+    width:100%;font:inherit;background:#fff;box-sizing:border-box;
+  }
+  .fiche-field .fiche-input-wrap textarea{
+    resize:none;overflow:hidden;white-space:pre-wrap;word-break:break-word;
+    line-height:1.4;min-height:2.4em;display:block;
+  }
+  .fiche-row2{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+  .fiche-row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;}
+  .fiche-row4{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px;align-items:start;}
+  .fiche-field-centered{align-items:center;}
+  .fiche-field-centered label{text-align:center;}
+  .fiche-field-centered .fiche-input-wrap{display:flex;justify-content:center;}
+  .fiche-field-centered .fiche-input-wrap input[type=checkbox]{width:auto;margin-top:4px;}
+
+  /* Zones de la fiche (Participation, Dossier) */
+  .fiche-section{
+    display:grid;gap:12px;border:1px solid var(--gris-bordure);
+    border-radius:6px;padding:12px;
+  }
+  .fiche-section-title{
+    font-size:12px;font-weight:700;color:var(--bleu-france);
+    text-transform:uppercase;letter-spacing:.04em;
+    margin:-4px 0 2px;
+  }
+
+  /* Couleurs par groupe de colonnes */
+  th.th-creneau-header{background:#4472C4;color:#fff;}
+  th.th-creneau-sub{background:#8EAADC;color:#1e1e1e;text-align:center;}
+  th.th-nature-header{background:#D0CECE;color:#1e1e1e;}
+  th.th-nature-sub{background:#ECECEC;color:#1e1e1e;text-align:center;}
+  th.th-dossier-header{background:#70AD47;color:#fff;}
+  th.th-dossier-sub{background:#A8D08E;color:#1e1e1e;text-align:center;}
+  th.th-participation-header{background:#FF5050;color:#fff;}
+  th.th-participation-sub{background:#F8CBAC;color:#1e1e1e;text-align:center;}
+  th.th-other{background:#8497B0;color:#fff;}
+  tbody td{
+    padding:6px 8px;border:1px solid var(--gris-bordure);
+    vertical-align:top;
+  }
+  tbody tr:nth-child(even){background:var(--gris-ligne-alt);}
+  tbody tr.passe td{color:var(--texte-clair);}
+  tbody tr.passe td.col-jour{color:var(--rouge-passe);}
+
+  td.col-jour{font-weight:700;white-space:nowrap;}
+  .date-mobile-jour{
+    font-weight:700;font-size:12px;text-align:center;
+    margin-bottom:2px;color:var(--texte);
+  }
+  tbody tr.passe .date-mobile-jour{color:var(--rouge-passe);}
+  td.mobile-date-cell{ vertical-align:middle; }
+  td.mobile-date-cell input.f-date{ height:auto; }
+  td.col-jour[rowspan], td.col-date[rowspan]{
+    vertical-align:middle;
+    background:var(--gris-fond);
+    border-right:1px solid var(--gris-bordure);
+  }
+  /* Sur une cellule fusionnée (rowspan), on ne veut pas que le champ
+     s'étire sur toute la hauteur fusionnée : il reste centré verticalement. */
+  td[rowspan] input[type=date], td[rowspan] input[type=time]{ height:auto; }
+  /* "Heure" reste toujours sur une seule ligne, même si la ligne s'agrandit
+     à cause d'un autre champ (Intitulé, Observations, etc.) : on centre
+     simplement la cellule verticalement plutôt que d'étirer le champ. */
+  td.col-heure{ vertical-align:middle; }
+  td.col-heure input.f-heure{ height:auto; }
+  .all-day-label{
+    font-size:12px;font-style:italic;text-align:center;
+    color:var(--texte-clair);white-space:nowrap;
+  }
+
+  /* Rendez-vous férié (IsHoliday) : fond blanc forcé + mention en rouge */
+  tbody tr.ferie, tbody tr.ferie td{ background:#fff !important; }
+  .ferie-badge{
+    color:#d32f2f;font-weight:700;white-space:nowrap;
+    flex:none;margin-top:1px;
+  }
+  td.ferie-row-cell{ padding:8px 14px; }
+  .ferie-row-content{
+    display:flex;align-items:center;flex-wrap:wrap;gap:10px;
+  }
+  .ferie-row-date{ font-weight:700;white-space:nowrap; }
+  .ferie-row-intitule{ color:var(--texte-clair);white-space:nowrap; }
+  .ferie-row-actions{ margin-left:auto;display:flex;align-items:center;gap:4px;flex:none; }
+  td.col-obs{min-width:220px;}
+  td.col-intitule{min-width:200px;}
+  .intitule-wrap{display:flex;align-items:flex-start;gap:5px;}
+  .intitule-wrap .static-field{flex:1;min-width:0;}
+
+  /* Affichage statique (lecture seule) dans le tableau — l'édition se fait
+     via la fiche. Pas de bordure : ce n'est pas un champ de formulaire. */
+  .static-field{
+    display:block;padding:4px 5px;min-height:1.6em;
+    white-space:pre-wrap;word-break:break-word;line-height:1.35;
+  }
+  .static-heure, .static-date, .static-recu{
+    text-align:center;white-space:nowrap;
+  }
+  .reflist-chip-static{
+    background:var(--gris-ligne-alt);border-radius:12px;
+    padding:2px 10px;margin:2px 4px 2px 0;display:inline-block;font-size:12px;
+  }
+  .intitule-wrap .fiche-btn{flex:none;margin-top:1px;}
+  .intitule-wrap .f-text{flex:1;min-width:0;}
+
+  /* Bandeau d'erreur d'écriture (très visible) */
+  #write-error-banner{
+    display:none;align-items:center;justify-content:space-between;gap:14px;
+    background:#c62828;color:#fff;
+    padding:10px 16px;font-size:13px;font-weight:600;
+    border-bottom:2px solid #7f0000;
+  }
+  #write-error-banner.show{display:flex;}
+  #write-error-banner .write-error-close{
+    flex:none;border:1px solid rgba(255,255,255,.6);background:rgba(255,255,255,.12);
+    color:#fff;border-radius:4px;padding:3px 10px;cursor:pointer;font-size:12px;
+  }
+  #write-error-banner .write-error-close:hover{background:rgba(255,255,255,.3);}
+
+  input[type=text], textarea, select{
+    width:100%;height:100%;border:1px solid var(--gris-bordure);background:transparent;
+    padding:4px 5px;border-radius:3px;font:inherit;color:inherit;
+    resize:vertical;box-sizing:border-box;
+  }
+  textarea.f-text{
+    display:block;
+    resize:none;
+    overflow:hidden;
+    white-space:pre-wrap;
+    word-break:break-word;
+    line-height:1.35;
+    font-family:inherit;
+    min-height:1.6em;
+  }
+  input[type=date], input[type=time]{
+    border:1px solid var(--gris-bordure);background:transparent;
+    padding:3px 4px;border-radius:3px;font:inherit;color:inherit;width:100%;height:100%;box-sizing:border-box;
+  }
+  input[type=text]:hover, textarea:hover, select:hover,
+  input[type=date]:hover, input[type=time]:hover{
+    border-color:var(--bleu-france);
+  }
+  input[type=text]:focus, textarea:focus, select:focus,
+  input[type=date]:focus, input[type=time]:focus{
+    outline:none;border-color:var(--bleu-france);
+    background:#fff;box-shadow:0 0 0 2px rgba(0,0,145,.12);
+  }
+  td.col-recu{text-align:center;}
+  input[type=checkbox]{width:18px;height:18px;accent-color:var(--vert-recu);cursor:pointer;}
+
+  td.col-actions{text-align:center;white-space:nowrap;width:1%;}
+
+  /* Participation_souhaitee : référence multiple (chips + sélecteur d'ajout) */
+  .reflist-box{
+    border:1px solid var(--gris-bordure);border-radius:3px;
+    padding:4px 5px;background:#fff;display:flex;flex-direction:column;gap:4px;
+    min-height:1.6em;box-sizing:border-box;
+  }
+  .reflist-chips{display:flex;flex-wrap:wrap;gap:4px;}
+  .reflist-chip{
+    display:inline-flex;align-items:center;gap:4px;
+    background:var(--gris-ligne-alt);border:1px solid var(--gris-bordure);
+    border-radius:12px;padding:1px 8px 1px 8px;font-size:12px;
+    line-height:1.6;white-space:nowrap;
+  }
+  .reflist-chip-remove{
+    border:none;background:transparent;color:var(--texte-clair);
+    cursor:pointer;font-size:13px;line-height:1;padding:2px 3px;border-radius:50%;
+  }
+  .reflist-chip-remove:hover{color:#fff;background:var(--rouge-passe);}
+  .reflist-add{
+    border:1px dashed var(--gris-bordure);border-radius:3px;
+    font-size:12px;padding:3px 4px;background:transparent;color:var(--texte-clair);
+  }
+  .reflist-add:hover{border-color:var(--bleu-france);color:var(--bleu-france);}
+  .del-btn{
+    width:24px;height:24px;border-radius:4px;
+    border:1px solid transparent;background:transparent;
+    color:var(--texte-clair);font-size:13px;line-height:1;
+    cursor:pointer;
+    display:inline-flex;align-items:center;justify-content:center;
+    transition:background .15s ease, color .15s ease, border-color .15s ease;
+  }
+  .del-btn:hover{background:#fdecea;border-color:#f3b4ac;color:var(--rouge-passe);}
+
+  #empty{padding:30px;text-align:center;color:var(--texte-clair);}
+  #loading{padding:30px;text-align:center;color:var(--texte-clair);}
+
+  /* Lignes d'ajout */
+  tr.add-row td{
+    height:5px;padding:0;border:none;
+    text-align:center;position:relative;
+  }
+  tr.add-row td.add-row-btn-cell{
+    text-align:left;
+  }
+  .add-btn{
+    width:16px;height:16px;border-radius:50%;
+    border:1px solid var(--bleu-france);background:#fff;
+    color:var(--bleu-france);font-size:11px;line-height:1;
+    padding:0;cursor:pointer;
+    display:inline-flex;align-items:center;justify-content:center;
+    opacity:.45;position:absolute;top:50%;left:4px;transform:translateY(-50%);
+    z-index:20;
+    box-shadow:0 1px 3px rgba(0,0,0,.2);
+    transition:opacity .15s ease, transform .15s ease, background .15s ease, color .15s ease;
+  }
+  tr.add-row:hover .add-btn{opacity:1;transform:translateY(-50%) scale(1.12);}
+  .add-btn:hover{background:var(--bleu-france);color:#fff;transform:translateY(-50%) scale(1.12);}
+  .add-btn-text{
+    margin-top:10px;padding:6px 14px;border-radius:4px;
+    border:1px solid var(--bleu-france);background:#fff;
+    color:var(--bleu-france);font:inherit;cursor:pointer;
+  }
+  .add-btn-text:hover{background:var(--bleu-france);color:#fff;}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="write-error-banner">
+    <span id="write-error-text"></span>
+    <button type="button" class="write-error-close" title="Fermer">✕</button>
+  </div>
+  <div id="topbar">
+    <div class="titre">Suivi DG / DGA</div>
+    <div class="switch-wrap">
+      <span class="switch-label" id="switch-label-editmode">Passer en mode édition rapide</span>
+      <div class="switch" id="switch-editmode"><div class="knob"></div></div>
+    </div>
+    <span id="count-masques"></span>
+    <div class="switch-wrap">
+      <span class="switch-label" id="switch-label">Afficher les rendez-vous passés</span>
+      <div class="switch" id="switch-passes"><div class="knob"></div></div>
+    </div>
+    <span id="statut"></span>
+  </div>
+  <div id="table-wrap">
+    <div id="loading">Chargement…</div>
+  </div>
+</div>
+
+<div id="fiche-overlay" class="hidden">
+  <div id="fiche-card">
+    <header>
+      <h2 id="fiche-title">Rendez-vous</h2>
+      <div class="fiche-header-actions">
+        <button type="button" class="fiche-print" title="Imprimer cette fiche (A4)">🖨 Imprimer</button>
+        <button type="button" class="fiche-close" title="Fermer">✕</button>
+      </div>
+    </header>
+    <div id="fiche-body"></div>
+    <footer>
+      <div class="fiche-footer-msg"><span id="fiche-dirty"></span><span id="fiche-error"></span></div>
+      <button type="button" class="fiche-cancel">Annuler</button>
+      <button type="button" class="fiche-validate">Valider</button>
+    </footer>
+  </div>
+</div>
+
+<script>
+const TABLE_ID = 'SuiviDG_DGA';
+
+// ---------- Journal de performance ----------
+// Mettre PERF_LOG à false pour couper tous les logs "[perf]" de la console.
+// Chaque ligne indique le temps écoulé depuis le chargement du script (+N ms).
+const PERF_LOG = true;
+const PERF_T0 = performance.now();
+let perfFetchCount = 0;
+let perfRenderCount = 0;
+function perfLog(msg){
+  if (PERF_LOG) console.log(`[perf +${Math.round(performance.now() - PERF_T0)}ms] ${msg}`);
+}
+async function perfTimed(label, fn){
+  const t = performance.now();
+  try{ return await fn(); }
+  finally{ perfLog(`${label} : ${Math.round(performance.now() - t)} ms`); }
+}
+// Cache de lecture (métadonnées Grist et tables d'entités) : pendant l'initialisation,
+// plusieurs fonctions demandaient les MÊMES tables (_grist_Tables lu ~10 fois,
+// Entites 4 fois...). On mémorise la promesse pour ne lire chaque table qu'une fois.
+const fetchCache = new Map();
+function cachedFetchTable(name){
+  if (fetchCache.has(name)){
+    perfLog(`  fetchTable (${name}) → servi par le cache`);
+    return fetchCache.get(name);
+  }
+  const promise = timedFetchTable(name);
+  fetchCache.set(name, promise);
+  return promise;
+}
+async function timedFetchTable(name){
+  const n = ++perfFetchCount;
+  const t = performance.now();
+  perfLog(`  fetchTable #${n} (${name}) → début`);
+  const result = await grist.docApi.fetchTable(name);
+  const rows = result && Array.isArray(result.id) ? result.id.length : '?';
+  perfLog(`  fetchTable #${n} (${name}) ← ${Math.round(performance.now() - t)} ms, ${rows} lignes`);
+  return result;
+}
+const JOURS = ['DIMANCHE','LUNDI','MARDI','MERCREDI','JEUDI','VENDREDI','SAMEDI'];
+
+let allRecords = [];      // enregistrements bruts renvoyés par Grist
+let dossierChoices = null; // liste des choix de Dossier_pour (si trouvée), sinon null
+let etatChoices = null;    // liste des choix de Etat (si trouvée), sinon null
+
+// --- Colonnes de référence multiple (RefList) vers une table d'entités ---
+// Système générique : chaque entrée décrit une colonne de SuiviDG_DGA qui
+// peut être une Ref/RefList, avec sa configuration détectée automatiquement
+// (table cible, colonne d'affichage "Nom") et son cache de valeurs.
+const REFLIST_COLUMNS = ['Participation_souhaitee', 'Sous_direction', 'Participants_designes', 'Bureau_competent'];
+// Filtre optionnel : ne proposer, dans la liste déroulante "+ Ajouter…", que
+// les entités dont la colonne indiquée (dans la table cible) vaut true.
+// Les entités déjà liées mais ne passant pas le filtre restent affichées
+// normalement dans les puces (seule la liste de *nouveaux* choix est filtrée).
+const REFLIST_FILTERS = {
+  Participation_souhaitee: 'estSsDir',
+  Sous_direction: 'estSsDir',
+};
+// Colonne de couleur optionnelle : pour ces colonnes, les vignettes ("puces")
+// sont colorées avec la valeur de cette colonne (recherchée par colId exact
+// puis par libellé) dans la table cible.
+const REFLIST_COLOR_FIELD = {
+  Sous_direction: 'Couleur',
+  Participation_souhaitee: 'Couleur',
+};
+const refListConfigs = {};
+for (const colId of REFLIST_COLUMNS){
+  refListConfigs[colId] = {
+    isRefList: false,      // true si la colonne est bien une Ref/RefList
+    isMultiple: true,      // true = RefList (plusieurs valeurs), false = Référence simple
+    entityTableId: null,   // tableId cible, ex. "Entites"
+    displayColId: null,    // colId du champ "Nom" dans cette table
+    colorColId: null,      // colId du champ "Couleur" dans cette table (si REFLIST_COLOR_FIELD le demande)
+    entities: [],          // [{id, name}] filtrées, triées par nom (pour le sélecteur d'ajout)
+    entityNameById: new Map(), // TOUTES les entités (pour l'affichage correct des puces existantes)
+    colorById: new Map(),      // TOUTES les entités -> couleur (ou pas d'entrée si non configuré)
+    rawRefs: new Map(),    // rowId (SuiviDG_DGA) -> [entityId, ...]
+  };
+}
+let showPast = false;
+let editMode = false;
+let hasRecuColumn = null;  // true / false / null (inconnu tant que pas de données)
+let dossierCollapsed = false;
+let participationCollapsed = false;
+let isMobileView = false; // vrai en dessous du seuil défini par MOBILE_BREAKPOINT_QUERY
+
+// ---------- Utilitaires de date ----------
+function toDate(v){
+  // Grist convertit automatiquement les colonnes Date/DateTime en objets Date
+  // JS lors de la lecture via onRecords. On garde toutefois un repli sur un
+  // nombre de secondes (timestamp Unix) au cas où la valeur brute serait reçue.
+  if (v === null || v === undefined || v === '') return null;
+  if (v instanceof Date) return v;
+  if (typeof v === 'number') return new Date(v * 1000);
+  const d = new Date(v);
+  return isNaN(d.getTime()) ? null : d;
+}
+function pad(n){ return String(n).padStart(2,'0'); }
+function fmtJour(d){ return JOURS[d.getDay()]; }
+function capitalize(s){ return s.charAt(0) + s.slice(1).toLowerCase(); }
+function fmtDate(d){ return `${pad(d.getDate())}/${pad(d.getMonth()+1)}/${d.getFullYear()}`; }
+const MOIS = ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
+function fmtDateLongue(d){ return `${pad(d.getDate())} ${MOIS[d.getMonth()]} ${d.getFullYear()}`; }
+function fmtHeure(d){ return `${pad(d.getHours())}:${pad(d.getMinutes())}`; }
+function toInputDate(d){ return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; }
+function toInputTime(d){ return `${pad(d.getHours())}:${pad(d.getMinutes())}`; }
+function startOfToday(){ const d = new Date(); d.setHours(0,0,0,0); return d; }
+
+// ---------- Statut / erreurs ----------
+function setStatut(msg, isErr){
+  const el = document.getElementById('statut');
+  el.textContent = msg || '';
+  el.className = isErr ? 'err' : '';
+  if (msg && !isErr){
+    setTimeout(()=>{ if (el.textContent === msg) el.textContent=''; }, 2000);
+  }
+}
+
+// ---------- Bandeau d'erreur d'écriture (très visible) ----------
+// On ne code aucune règle de permission dans le widget : on laisse Grist
+// accepter ou refuser chaque action via les règles d'accès avancées définies
+// sur le document. Si Grist refuse (droits insuffisants), on le détecte via
+// le message d'erreur ("Blocked by access rules" / "ACL_DENY", formulation
+// standard de Grist) et on l'affiche de façon impossible à manquer.
+function writeErrorText(e, contexte){
+  const raw = (e && e.message) ? e.message : String(e);
+  const estPermission = /blocked by access rules|acl_deny|access denied|not authorized/i.test(raw);
+  return estPermission
+    ? `🚫 Modification refusée par les règles d'accès Grist : vous n'avez pas les droits nécessaires pour ${contexte}.`
+    : `⚠️ Échec — ${contexte} : ${raw}`;
+}
+function showWriteError(e, contexte){
+  const banner = document.getElementById('write-error-banner');
+  document.getElementById('write-error-text').textContent = writeErrorText(e, contexte);
+  banner.classList.add('show');
+}
+function hideWriteError(){
+  document.getElementById('write-error-banner').classList.remove('show');
+}
+
+// ---------- Ecriture vers Grist ----------
+async function updateField(rowId, colId, value){
+  try{
+    await grist.docApi.applyUserActions([['UpdateRecord', TABLE_ID, rowId, {[colId]: value}]]);
+    setStatut('Enregistré ✓', false);
+    hideWriteError();
+  }catch(e){
+    console.error(e);
+    setStatut('Échec de l\'enregistrement', true);
+    showWriteError(e, 'modifier cette ligne');
+    // L'écriture a échoué : allRecords n'a jamais été modifié (il ne reflète
+    // que ce que Grist a confirmé), donc un simple nouveau rendu suffit à
+    // remettre la valeur précédente dans le tableau, quel que soit le type
+    // de champ (texte, date, heure, liste, case à cocher).
+    render();
+    const overlay = document.getElementById('fiche-overlay');
+    if (!overlay.classList.contains('hidden') && Number(overlay.dataset.rowId) === rowId){
+      openFiche(rowId); // reconstruit la fiche avec la valeur non modifiée
+    }
+  }
+}
+
+// Combine une nouvelle date et une nouvelle heure (dont l'une peut être inchangée)
+// avec la valeur Date_RDV existante, puis écrit le timestamp résultant.
+function updateDateHeure(rec, newDatePart, newTimePart){
+  const cur = toDate(rec.Date_RDV) || new Date();
+  const [y,m,d] = (newDatePart || toInputDate(cur)).split('-').map(Number);
+  const [hh,mm] = (newTimePart || toInputTime(cur)).split(':').map(Number);
+  const newDate = new Date(y, (m-1), d, hh, mm, 0, 0);
+  const ts = Math.floor(newDate.getTime()/1000);
+  updateField(rec.id, 'Date_RDV', ts);
+}
+
+// ---------- Récupération des choix (colonnes de type "Liste de choix") ----------
+// Fonction générique : retourne le tableau de choix configuré pour la colonne
+// `colId` de la table SuiviDG_DGA, ou null si la colonne n'existe pas / n'est
+// pas une colonne à choix.
+async function fetchChoicesFor(colId){
+  try{
+    const tables = await cachedFetchTable('_grist_Tables');
+    const idx = tables.tableId.findIndex(t => t === TABLE_ID);
+    if (idx === -1) return null;
+    const tableRef = tables.id[idx];
+
+    const cols = await cachedFetchTable('_grist_Tables_column');
+    const cIdx = cols.colId.findIndex((c,i) => c === colId && cols.parentId[i] === tableRef);
+    if (cIdx === -1) return null;
+
+    const opts = cols.widgetOptions[cIdx];
+    if (!opts) return null;
+    const parsed = JSON.parse(opts);
+    return Array.isArray(parsed.choices) ? parsed.choices : null;
+  }catch(e){
+    console.warn(`Impossible de récupérer les choix de la colonne ${colId}, repli sur champ texte.`, e);
+    return null;
+  }
+}
+
+async function loadDossierChoices(){
+  dossierChoices = await fetchChoicesFor('Dossier_pour');
+  etatChoices = await fetchChoicesFor('Etat');
+}
+
+// ---------- Colonnes RefList : configuration de la référence multiple ----------
+// Détecte automatiquement, via les métadonnées Grist, qu'une colonne donnée
+// (colId) est une colonne Ref/RefList, quelle table elle cible, et repère
+// dans cette table la colonne "Nom" pour l'affichage.
+async function loadRefListConfig(colId){
+  const cfg = refListConfigs[colId];
+  try{
+    const tables = await cachedFetchTable('_grist_Tables');
+    const srcIdx = tables.tableId.findIndex(t => t === TABLE_ID);
+    if (srcIdx === -1) return;
+    const srcRef = tables.id[srcIdx];
+
+    const cols = await cachedFetchTable('_grist_Tables_column');
+    const colIdx = cols.colId.findIndex((c,i) => c === colId && cols.parentId[i] === srcRef);
+    if (colIdx === -1) return;
+
+    const type = cols.type[colIdx] || '';
+    const m = /^Ref(?:List)?:(.+)$/.exec(type);
+    if (!m){
+      console.warn(`${colId} n'est pas une colonne de référence (type: ${type}), repli sur champ texte.`);
+      return;
+    }
+    cfg.entityTableId = m[1];
+    cfg.isMultiple = type.startsWith('RefList:'); // false = Référence simple (une seule valeur)
+
+    const targetIdx = tables.tableId.findIndex(t => t === cfg.entityTableId);
+    if (targetIdx === -1) return;
+    const targetRef = tables.id[targetIdx];
+
+    // La colonne d'affichage s'appelle "Nom" (colId ou libellé) dans la
+    // table cible. On la cherche d'abord par colId exact, puis par libellé,
+    // pour être robuste aux deux conventions de nommage Grist.
+    let dIdx = cols.colId.findIndex((c,i) =>
+      cols.parentId[i] === targetRef && c === 'Nom'
+    );
+    if (dIdx === -1){
+      dIdx = cols.colId.findIndex((c,i) =>
+        cols.parentId[i] === targetRef &&
+        String(cols.label[i] || '').trim().toLowerCase() === 'nom'
+      );
+    }
+    cfg.displayColId = dIdx !== -1 ? cols.colId[dIdx] : null;
+    if (!cfg.displayColId){
+      console.warn(`Colonne "Nom" introuvable dans la table ${cfg.entityTableId} (pour ${colId}).`);
+    }
+
+    // Colonne de couleur (optionnelle, cf. REFLIST_COLOR_FIELD) : même
+    // logique de recherche (colId exact, puis libellé).
+    const colorFieldName = REFLIST_COLOR_FIELD[colId];
+    if (colorFieldName){
+      let cIdx = cols.colId.findIndex((c,i) =>
+        cols.parentId[i] === targetRef && c === colorFieldName
+      );
+      if (cIdx === -1){
+        cIdx = cols.colId.findIndex((c,i) =>
+          cols.parentId[i] === targetRef &&
+          String(cols.label[i] || '').trim().toLowerCase() === colorFieldName.toLowerCase()
+        );
+      }
+      cfg.colorColId = cIdx !== -1 ? cols.colId[cIdx] : null;
+      if (!cfg.colorColId){
+        console.warn(`Colonne "${colorFieldName}" introuvable dans la table ${cfg.entityTableId} (pour ${colId}) — puces non colorées.`);
+      }
+    }
+
+    await loadRefListEntities(colId);
+    cfg.isRefList = true;
+  }catch(e){
+    console.warn(`Impossible de configurer la référence ${colId}.`, e);
+  }
+}
+
+async function loadRefListEntities(colId){
+  const cfg = refListConfigs[colId];
+  if (!cfg.entityTableId) return;
+  try{
+    const table = await cachedFetchTable(cfg.entityTableId);
+    if (!table || !Array.isArray(table.id)) return;
+    const dCol = cfg.displayColId || Object.keys(table).find(k => k !== 'id') || 'id';
+
+    const allEntities = table.id.map((id, i) => ({ id, name: String(table[dCol][i] ?? `#${id}`) }));
+    // Toutes les entités : nécessaire pour afficher correctement le nom
+    // d'une entité déjà liée même si elle ne passe pas (ou plus) le filtre.
+    cfg.entityNameById = new Map(allEntities.map(e => [e.id, e.name]));
+
+    // Couleur de chaque entité (si une colonne "Couleur" a été détectée) —
+    // sur toutes les entités aussi, pour les mêmes raisons.
+    cfg.colorById = new Map();
+    if (cfg.colorColId && table[cfg.colorColId]){
+      table.id.forEach((id, i) => {
+        const c = table[cfg.colorColId][i];
+        if (c) cfg.colorById.set(id, String(c));
+      });
+    }
+
+    const filterColId = REFLIST_FILTERS[colId];
+    const filterCol = filterColId ? table[filterColId] : null;
+    if (filterColId && !filterCol){
+      console.warn(`Colonne de filtre "${filterColId}" introuvable dans ${cfg.entityTableId} (pour ${colId}) — aucun filtre appliqué.`);
+    }
+    cfg.entities = (filterCol ? allEntities.filter((e,i) => filterCol[i] === true) : allEntities)
+      .sort((a,b) => a.name.localeCompare(b.name, 'fr'));
+  }catch(e){
+    console.warn(`Impossible de charger la table ${cfg.entityTableId} (pour ${colId}).`, e);
+  }
+}
+
+// ---------- Hiérarchie des entités (pour filtrer Participants_designes) ----------
+// La table des entités (cible de Participation_souhaitee / Sous_direction)
+// contient une colonne d'auto-référence ("Parent") représentant sa
+// hiérarchie. On la détecte automatiquement, puis on construit la relation
+// inverse (parent -> enfants) pour pouvoir calculer tous les descendants
+// d'une entité donnée.
+let entitesTableId = null;
+let entitesParentColId = null;
+let entitesChildrenByParent = new Map(); // entityId -> [entityId enfant, ...]
+let entitesParentById = new Map();       // entityId -> entityId parent (ou undefined)
+
+async function loadEntitesHierarchy(){
+  entitesTableId = refListConfigs.Participation_souhaitee.entityTableId
+    || refListConfigs.Sous_direction.entityTableId;
+  if (!entitesTableId) return;
+  try{
+    const tables = await cachedFetchTable('_grist_Tables');
+    const tIdx = tables.tableId.findIndex(t => t === entitesTableId);
+    if (tIdx === -1) return;
+    const tRef = tables.id[tIdx];
+
+    const cols = await cachedFetchTable('_grist_Tables_column');
+    const pIdx = cols.colId.findIndex((c,i) =>
+      cols.parentId[i] === tRef && (cols.type[i] || '') === `Ref:${entitesTableId}`
+    );
+    entitesParentColId = pIdx !== -1 ? cols.colId[pIdx] : null;
+    if (!entitesParentColId){
+      console.warn(`Colonne "Parent" (auto-référence) introuvable dans ${entitesTableId} : le filtrage hiérarchique de Participants_designes et l'héritage de couleur seront désactivés.`);
+      return;
+    }
+
+    const table = await cachedFetchTable(entitesTableId);
+    entitesChildrenByParent = new Map();
+    entitesParentById = new Map();
+    table.id.forEach((id, i) => {
+      const parentId = table[entitesParentColId][i] || null;
+      if (parentId){
+        entitesParentById.set(id, parentId);
+        if (!entitesChildrenByParent.has(parentId)) entitesChildrenByParent.set(parentId, []);
+        entitesChildrenByParent.get(parentId).push(id);
+      }
+    });
+  }catch(e){
+    console.warn('Impossible de charger la hiérarchie des entités.', e);
+  }
+}
+
+// Renvoie l'ensemble des identifiants d'entités "descendantes" d'une liste
+// d'entités racines, racines elles-mêmes incluses.
+function getDescendantEntityIds(rootIds){
+  const result = new Set();
+  const stack = [...rootIds];
+  while (stack.length){
+    const id = stack.pop();
+    if (result.has(id)) continue;
+    result.add(id);
+    const children = entitesChildrenByParent.get(id) || [];
+    for (const c of children) stack.push(c);
+  }
+  return result;
+}
+
+// ---------- Entité de chaque utilisateur (table cible de Participants_designes) ----------
+// Détecte automatiquement, dans la table des Utilisateurs, la colonne qui
+// référence la table des entités, pour pouvoir la croiser avec la hiérarchie.
+let participantsUserEntiteColId = null;
+let participantsUserEntiteById = new Map(); // userId -> entityId (ou null)
+
+async function loadParticipantsUserEntites(){
+  const cfg = refListConfigs.Participants_designes;
+  if (!cfg.entityTableId || !entitesTableId) return;
+  try{
+    const tables = await cachedFetchTable('_grist_Tables');
+    const tIdx = tables.tableId.findIndex(t => t === cfg.entityTableId);
+    if (tIdx === -1) return;
+    const tRef = tables.id[tIdx];
+
+    const cols = await cachedFetchTable('_grist_Tables_column');
+    const eIdx = cols.colId.findIndex((c,i) =>
+      cols.parentId[i] === tRef && (cols.type[i] || '') === `Ref:${entitesTableId}`
+    );
+    participantsUserEntiteColId = eIdx !== -1 ? cols.colId[eIdx] : null;
+    if (!participantsUserEntiteColId){
+      console.warn(`Colonne de référence vers ${entitesTableId} introuvable dans ${cfg.entityTableId} : le filtrage hiérarchique de Participants_designes sera désactivé.`);
+      return;
+    }
+
+    const table = await cachedFetchTable(cfg.entityTableId);
+    participantsUserEntiteById = new Map();
+    table.id.forEach((id, i) => {
+      participantsUserEntiteById.set(id, table[participantsUserEntiteColId][i] || null);
+    });
+  }catch(e){
+    console.warn('Impossible de charger les entités des utilisateurs.', e);
+  }
+}
+
+// ---------- Filtre dynamique pour la liste déroulante de Participants_designes ----------
+// Ne propose que les utilisateurs dont l'entité est l'une des entités
+// sélectionnées dans Participation_souhaitee, ou un de leurs descendants.
+function getParticipantsDesignesAvailable(cfg, rec, currentIds){
+  const base = cfg.entities.filter(e => !currentIds.includes(e.id));
+  const participationIds = getRefIds('Participation_souhaitee', rec);
+  if (!participationIds.length || !participantsUserEntiteColId) return base;
+  const allowedEntityIds = getDescendantEntityIds(participationIds);
+  return base.filter(u => {
+    const entiteId = participantsUserEntiteById.get(u.id);
+    return entiteId != null && allowedEntityIds.has(entiteId);
+  });
+}
+
+// ---------- Filtre dynamique pour la liste déroulante de Bureau_competent ----------
+// Ne propose que les entités qui sont des enfants DIRECTS (pas tous les
+// descendants) de l'entité (ou des entités) sélectionnée(s) dans Sous_direction.
+function getBureauCompetentAvailable(cfg, rec, currentIds){
+  const base = cfg.entities.filter(e => !currentIds.includes(e.id));
+  const sousDirIds = getRefIds('Sous_direction', rec);
+  if (!sousDirIds.length) return base;
+  const directChildIds = new Set();
+  for (const parentId of sousDirIds){
+    for (const childId of (entitesChildrenByParent.get(parentId) || [])) directChildIds.add(childId);
+  }
+  return base.filter(e => directChildIds.has(e.id));
+}
+
+// Association colId -> fonction de filtrage dynamique (au lieu du simple
+// filtre booléen constant de REFLIST_FILTERS).
+const REFLIST_DYNAMIC_AVAILABLE = {
+  Participants_designes: getParticipantsDesignesAvailable,
+  Bureau_competent: getBureauCompetentAvailable,
+};
+
+
+// fetchTable, sous la forme la plus courante ["r", tableId, [id, id...]],
+// avec repli défensif sur ["L", id, id...] ou un tableau déjà "nu".
+function parseRefListRaw(v){
+  if (Array.isArray(v)){
+    if (v[0] === 'r') return Array.isArray(v[2]) ? v[2].filter(x => typeof x === 'number') : [];
+    if (v[0] === 'L') return v.slice(1).filter(x => typeof x === 'number');
+    return v.filter(x => typeof x === 'number');
+  }
+  if (typeof v === 'number' && v > 0) return [v]; // au cas où ce serait une Ref simple
+  return [];
+}
+
+// Extrait les identifiants bruts des colonnes de référence directement depuis
+// les records fournis par grist.onRecords(). Par défaut onRecords renvoie le
+// CONTENU affiché des références (expandRefs = true) ; on l'appelle avec
+// { expandRefs: false } pour recevoir les identifiants de lignes, ce qui évite
+// de relire toute la table (1,4 s pour 911 lignes).
+function updateRawRefsFromRecords(records){
+  for (const colId of REFLIST_COLUMNS){
+    const map = new Map();
+    for (const r of records) map.set(r.id, parseRefListRaw(r[colId]));
+    refListConfigs[colId].rawRefs = map;
+  }
+}
+
+// Vérifie que les colonnes CONFIGURÉES comme références contiennent bien des
+// identifiants (nombres) et non des libellés. Une colonne dont le type n'est
+// pas (encore) connu comme Ref/RefList est ignorée : elle peut légitimement
+// contenir du texte. Renvoie la liste des colonnes suspectes, avec un exemple.
+function findLabelRefColumns(records){
+  const bad = [];
+  for (const colId of REFLIST_COLUMNS){
+    if (!refListConfigs[colId].isRefList) continue;
+    const isLabel = v => (typeof v === 'string' && v !== '') ||
+      (Array.isArray(v) && v.some(x => typeof x === 'string' && x !== 'L' && x !== 'r'));
+    const sample = records.find(r => isLabel(r[colId]));
+    if (sample) bad.push(`${colId} (ex. ${JSON.stringify(sample[colId])})`);
+  }
+  return bad;
+}
+let rawRefsFromRecordsOk = true;
+
+// Repli : lecture complète de SuiviDG_DGA (lent), utilisée seulement si
+// onRecords ne fournit pas les identifiants bruts.
+async function refreshAllRefListRawRefs(){
+  const active = REFLIST_COLUMNS.filter(c => refListConfigs[c].isRefList);
+  if (!active.length) return;
+  await perfTimed(`refreshAllRefListRawRefs (${active.length} colonnes, 1 seule lecture de ${TABLE_ID})`, async () => {
+    try{
+      const table = await timedFetchTable(TABLE_ID);
+      for (const colId of active){
+        const col = table[colId];
+        const map = new Map();
+        if (col){
+          table.id.forEach((rowId, i) => { map.set(rowId, parseRefListRaw(col[i])); });
+        }
+        refListConfigs[colId].rawRefs = map;
+      }
+    }catch(e){
+      console.warn('Impossible de récupérer les références brutes.', e);
+    }
+  });
+}
+
+// ---------- Calcul des fusions (rowspan) pour Jour / Date RDV ----------
+// Les lignes consécutives (après tri) qui partagent la même date calendaire
+// sont fusionnées sur les colonnes "Jour" et "Date RDV". Les lignes sans date
+// ne sont jamais fusionnées entre elles.
+//
+// IMPORTANT : une ligne interstitielle "+" est insérée entre CHAQUE ligne de
+// données (y compris à l'intérieur d'un même groupe fusionné). Le rowspan
+// doit donc couvrir non seulement les k lignes de données du groupe, mais
+// aussi les (k-1) lignes "+" intercalées entre elles, soit 2k-1 <tr> au total.
+function computeRowSpans(visibles){
+  const n = visibles.length;
+  const dateKeys = visibles.map(r => {
+    if (r.IsHoliday) return null; // une ligne fériée n'est jamais fusionnée avec une autre
+    const d = toDate(r.Date_RDV);
+    return d ? toInputDate(d) : null;
+  });
+  const rowSpans = new Array(n).fill(1);
+  const showRow = new Array(n).fill(true);
+
+  let i = 0;
+  while (i < n){
+    const key = dateKeys[i];
+    if (key === null){
+      i++;
+      continue;
+    }
+    let j = i + 1;
+    while (j < n && dateKeys[j] === key) j++;
+    const groupSize = j - i;
+    rowSpans[i] = groupSize > 1 ? (2 * groupSize - 1) : 1;
+    for (let k = i + 1; k < j; k++) showRow[k] = false;
+    i = j;
+  }
+  return { rowSpans, showRow, dateKeys };
+}
+
+// ---------- Calcul de la date/heure par défaut pour une nouvelle ligne ----------
+// recA = enregistrement juste au-dessus du point d'insertion (ou null si en tête)
+// recB = enregistrement juste en-dessous du point d'insertion (ou null si en bas)
+function computeInsertDate(recA, recB){
+  const dA = recA ? toDate(recA.Date_RDV) : null;
+  const dB = recB ? toDate(recB.Date_RDV) : null;
+  const now = new Date();
+
+  if (dA && dB){
+    // Entre deux lignes datées : on prend le milieu entre les deux dates
+    return new Date((dA.getTime() + dB.getTime()) / 2);
+  }
+  if (dA && !dB){
+    // En bas de liste (ou juste avant une ligne sans date) : après la date la plus récente
+    if (dA < now){
+      // Cette date est déjà passée -> demain 9h
+      return new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 9, 0, 0, 0);
+    }
+    return new Date(dA.getTime() + 24 * 3600 * 1000);
+  }
+  // Aucune date de référence disponible -> demain 9h
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 9, 0, 0, 0);
+}
+
+// ---------- Ajout d'une ligne ----------
+async function addRow(dateObj){
+  const ts = dateObj ? Math.floor(dateObj.getTime() / 1000) : null;
+  try{
+    await grist.docApi.applyUserActions([['AddRecord', TABLE_ID, null, { Date_RDV: ts }]]);
+    setStatut('Ligne ajoutée ✓', false);
+    hideWriteError();
+  }catch(e){
+    console.error(e);
+    setStatut("Échec de l'ajout", true);
+    showWriteError(e, 'ajouter une ligne');
+  }
+}
+
+// ---------- Suppression (logique) d'une ligne ----------
+// On ne supprime plus l'enregistrement Grist : on marque simplement la
+// colonne booléenne IsDeleted à true. La ligne disparaît de l'affichage
+// (cf. filtrage dans render()) mais reste récupérable côté Grist.
+async function deleteRow(rowId){
+  if (!confirm('Supprimer cette ligne ?')) return;
+  try{
+    await grist.docApi.applyUserActions([['UpdateRecord', TABLE_ID, rowId, { IsDeleted: true }]]);
+    setStatut('Ligne supprimée ✓', false);
+    hideWriteError();
+  }catch(e){
+    console.error(e);
+    setStatut('Échec de la suppression', true);
+    showWriteError(e, 'supprimer cette ligne');
+  }
+}
+
+// Génère la ligne interstitielle avec le bouton "+".
+// sameGroup=true signifie qu'on est encore dans la fusion (rowspan) Jour/Date RDV
+// de la ligne précédente : dans ce cas il ne faut PAS régénérer cette cellule
+// (elle est déjà couverte par le rowspan de la ligne au-dessus), seule la
+// cellule "Heure" doit encore être comblée.
+// Le bouton "+" est placé juste après la colonne "Heure", au début de la
+// colonne "Nature du RDV" (Intitulé), plutôt que centré sur toute la largeur.
+// nbColonnes : nombre total de colonnes de données actuellement visibles dans
+// le tbody (varie selon que les blocs Dossier/Participation sont repliés, et
+// selon qu'on est en vue mobile — sans colonne "Jour" — ou non).
+function renderAddRow(recA, recB, sameGroup, nbColonnes){
+  const afterId = recA ? recA.id : '';
+  const beforeId = recB ? recB.id : '';
+  const nbCreneauCols = isMobileView ? 2 : 3;
+  const fillerColspan = sameGroup ? 1 : nbCreneauCols; // Heure seule, ou tout le bloc Créneau
+  const btnColspan = nbColonnes - nbCreneauCols;        // de Intitulé jusqu'à Actions
+  return `<tr class="add-row" data-after="${afterId}" data-before="${beforeId}">
+    <td colspan="${fillerColspan}"></td>
+    <td class="add-row-btn-cell" colspan="${btnColspan}"><button type="button" class="add-btn" title="Ajouter une ligne ici">+</button></td>
+  </tr>`;
+}
+
+// ---------- Rendu ----------
+function render(){
+  const pr = { n: ++perfRenderCount, t0: performance.now() };
+  const wrap = document.getElementById('table-wrap');
+
+  // Suppression logique : on ne travaille qu'avec les lignes non supprimées.
+  const activeRecords = allRecords.filter(r => r.IsDeleted !== true);
+
+  if (!activeRecords.length){
+    wrap.innerHTML = `<div id="empty">Aucun élément dans SuiviDG_DGA.<br>
+      <button type="button" id="add-first-btn" class="add-btn-text">+ Ajouter une ligne</button></div>`;
+    document.getElementById('count-masques').textContent = '';
+    const addFirstBtn = document.getElementById('add-first-btn');
+    if (addFirstBtn) addFirstBtn.addEventListener('click', () => addRow(computeInsertDate(null, null)));
+    return;
+  }
+
+  hasRecuColumn = Object.prototype.hasOwnProperty.call(activeRecords[0], 'Recu');
+
+  const today0 = startOfToday();
+  let visibles = activeRecords.filter(r => {
+    const d = toDate(r.Date_RDV);
+    if (!d) return true; // pas de date -> toujours visible, tri en fin de liste
+    if (showPast) return true;
+    return d >= today0;
+  });
+
+  const masques = activeRecords.length - visibles.length;
+  document.getElementById('count-masques').textContent =
+    masques > 0 ? `(${masques} rendez-vous passé${masques>1?'s':''} masqué${masques>1?'s':''})` : '';
+
+  if (!visibles.length){
+    wrap.innerHTML = `<div id="empty">Aucun rendez-vous à afficher (les rendez-vous passés sont masqués).<br>
+      <button type="button" id="add-first-btn" class="add-btn-text">+ Ajouter une ligne</button></div>`;
+    const addFirstBtn = document.getElementById('add-first-btn');
+    if (addFirstBtn) addFirstBtn.addEventListener('click', () => addRow(computeInsertDate(null, null)));
+    return;
+  }
+
+  visibles.sort((a,b)=>{
+    const da = a.Date_RDV, db = b.Date_RDV;
+    if (da === null || da === undefined) return 1;
+    if (db === null || db === undefined) return -1;
+    return da - db;
+  });
+
+  const { rowSpans, showRow, dateKeys } = computeRowSpans(visibles);
+  pr.tPrep = performance.now();
+
+  const nbDossierCols = dossierCollapsed ? 1 : 4;
+  const nbParticipationCols = participationCollapsed ? 1 : 3;
+  const nbCreneauCols = isMobileView ? 2 : 3; // pas de colonne "Jour" séparée en vue mobile
+  const nbColonnes = nbCreneauCols + 1 + nbParticipationCols + nbDossierCols + 1 + 1 + 1;
+
+  const dossierToggleIcon = dossierCollapsed ? '▸' : '◂';
+  const participationToggleIcon = participationCollapsed ? '▸' : '◂';
+
+  let html = `<table><thead>
+    <tr>
+      <th class="th-creneau-header freeze-col" colspan="${nbCreneauCols}">Créneau</th>
+      <th class="th-nature-header freeze-col freeze-edge">Nature du RDV</th>
+      <th class="th-participation-header" colspan="${nbParticipationCols}">Participation
+        <button type="button" class="grp-toggle" data-group="participation" title="${participationCollapsed?'Déplier':'Replier'} le bloc Participation">${participationToggleIcon}</button>
+      </th>
+      <th class="th-dossier-header" colspan="${nbDossierCols}">Dossier
+        <button type="button" class="grp-toggle" data-group="dossier" title="${dossierCollapsed?'Déplier':'Replier'} le bloc Dossier">${dossierToggleIcon}</button>
+      </th>
+      <th class="th-other" rowspan="3">Observations</th>
+      <th class="th-other" rowspan="3">Reçu</th>
+      <th class="th-other" rowspan="3">Actions</th>
+    </tr>
+    <tr>
+      <th class="th-creneau-sub freeze-col" colspan="${nbCreneauCols}">Sec préfet</th>
+      <th class="th-nature-sub freeze-col freeze-edge">Sec préfet</th>`;
+
+  if (participationCollapsed){
+    html += `<th class="th-participation-sub">…</th>`;
+  } else {
+    html += `<th class="th-participation-sub">Sec préfet</th>
+      <th class="th-participation-sub">Cab DG</th>
+      <th class="th-participation-sub">Sec ss-dir</th>`;
+  }
+
+  if (dossierCollapsed){
+    html += `<th class="th-dossier-sub">…</th>`;
+  } else {
+    html += `<th class="th-dossier-sub">Cab DG</th>
+      <th class="th-dossier-sub">Sec Cab DG</th>
+      <th class="th-dossier-sub">Sec Sous-dir</th>
+      <th class="th-dossier-sub">Cab DG</th>`;
+  }
+
+  html += `</tr>
+    <tr>
+      ${isMobileView ? '' : '<th class="th-creneau-sub freeze-col col-jour">Jour</th>'}<th class="th-creneau-sub freeze-col col-date">Date RDV</th><th class="th-creneau-sub freeze-col col-heure">Heure</th>
+      <th class="th-nature-sub freeze-col freeze-edge">Intitulé</th>`;
+
+  if (participationCollapsed){
+    html += `<th class="th-participation-sub grp-collapsed-head" data-group="participation" title="Cliquer pour déplier">Participation</th>`;
+  } else {
+    html += `<th class="th-participation-sub">Composition de la délégation</th><th class="th-participation-sub">Participation souhaitée (services)</th><th class="th-participation-sub">Participants désignés</th>`;
+  }
+
+  if (dossierCollapsed){
+    html += `<th class="th-dossier-sub grp-collapsed-head" data-group="dossier" title="Cliquer pour déplier">Dossier</th>`;
+  } else {
+    html += `<th class="th-dossier-sub">Dossier pour</th><th class="th-dossier-sub">Sous-dir</th><th class="th-dossier-sub">Bureau compétent</th><th class="th-dossier-sub">Etat</th>`;
+  }
+
+  html += `</tr>
+  </thead><tbody>`;
+
+  for (let idx = 0; idx < visibles.length; idx++){
+    const rec = visibles[idx];
+    const d = toDate(rec.Date_RDV);
+    const passe = d && d < today0;
+    const ferie = !!rec.IsHoliday;
+    html += `<tr data-id="${rec.id}" class="${passe?'passe':''} ${ferie?'ferie':''}">`;
+
+    if (ferie){
+      // Ligne fériée : toutes les colonnes sont fusionnées en une seule
+      // cellule d'information, sans aucun champ de formulaire.
+      html += `<td colspan="${nbColonnes}" class="ferie-row-cell">
+        <div class="ferie-row-content">
+          <span class="ferie-row-date">${d ? escapeHtml(`${capitalize(fmtJour(d))} ${fmtDate(d)}`) : ''}</span>
+          <span class="ferie-badge">FÉRIÉ</span>
+          ${rec.Intitule ? `<span class="ferie-row-intitule">${escapeHtml(rec.Intitule)}</span>` : ''}
+          <span class="ferie-row-actions">
+            <button type="button" class="fiche-btn" title="Voir en fiche">▤</button>
+            <button type="button" class="del-btn" title="Supprimer cette ligne">✕</button>
+          </span>
+        </div>
+      </td>`;
+      html += `</tr>`;
+
+      const nextRec = visibles[idx + 1] || null;
+      html += renderAddRow(rec, nextRec, false, nbColonnes);
+      continue;
+    }
+
+    if (showRow[idx]){
+      const span = rowSpans[idx];
+      const spanAttr = span > 1 ? ` rowspan="${span}"` : '';
+      // -- Ancien affichage en formulaire (conservé en commentaire) --
+      if (editMode) {
+       if (!isMobileView){
+      
+        html += `<td class="col-jour freeze-col"${spanAttr}>${d ? fmtJour(d) : '—'}</td>`;
+        html += `<td class="col-date freeze-col"${spanAttr}>${dateFieldHtml(d)}</td>`;
+       } else {
+         html += `<td class="col-date freeze-col mobile-date-cell"${spanAttr}>
+         ${d ? `<div class="date-mobile-jour">${escapeHtml(capitalize(fmtJour(d)))}</div>` : ''}
+           ${dateFieldHtml(d)}
+        </td>`;
+       }
+      } else {
+        if (!isMobileView){
+          html += `<td class="col-jour freeze-col"${spanAttr}>${d ? fmtJour(d) : '—'}</td>`;
+          html += `<td class="col-date freeze-col"${spanAttr}>${staticDateHtml(d)}</td>`;
+        } else {
+          html += `<td class="col-date freeze-col mobile-date-cell"${spanAttr}>
+            ${d ? `<div class="date-mobile-jour">${escapeHtml(capitalize(fmtJour(d)))}</div>` : ''}
+            ${staticDateHtml(d)}
+          </td>`;
+        }
+      }
+    }
+    if (editMode) {
+     html += `<td class="freeze-col col-heure">${heureCellHtml(rec, d)}</td>`;
+     html += `<td class="col-intitule freeze-col freeze-edge"><div class="intitule-wrap"><button type="button" class="fiche-btn" title="Voir en fiche">▤</button>${textFieldHtml('Intitule', rec.Intitule)}</div></td>`;
+    } else {
+     html += `<td class="freeze-col col-heure">${staticHeureHtml(rec, d)}</td>`;
+     html += `<td class="col-intitule freeze-col freeze-edge"><div class="intitule-wrap"><button type="button" class="fiche-btn" title="Voir en fiche">▤</button>${staticFieldHtml(rec.Intitule)}</div></td>`;
+    }
+    if (participationCollapsed){
+      html += `<td class="grp-collapsed-cell" data-group="participation" title="Cliquer pour déplier">…</td>`;
+    } else {
+      if (editMode) {
+        html += `<td>${textFieldHtml('Composition_delegation', rec.Composition_delegation)}</td>`;
+        html += `<td>${refListConfigs.Participation_souhaitee.isRefList ? refListFieldHtml('Participation_souhaitee', rec) : textFieldHtml('Participation_souhaitee', rec.Participation_souhaitee)}</td>`;
+        //html += `<td>${textFieldHtml('Participants_designes', rec.Participants_designes)}</td>`;
+		html += `<td>${refListConfigs.Participants_designes.isRefList ? refListFieldHtml('Participants_designes', rec) : textFieldHtml('Participants_designes', rec.Participants_designes)} <br/> ${textFieldHtml('Autres_participants', rec.Autres_participants)}</td>`;
+        
+	  } else {
+        html += `<td>${staticFieldHtml(rec.Composition_delegation)}</td>`;
+        html += `<td>${staticRefListHtml('Participation_souhaitee', rec)}</td>`;
+        html += `<td>${staticRefListHtml('Participants_designes', rec)} ${rec.Autres_participants ? `<div class="static-field static-autres">${escapeHtml(rec.Autres_participants)}</div>` : ''}</td>`;
+      }
+    }
+
+    if (dossierCollapsed){
+      html += `<td class="grp-collapsed-cell" data-group="dossier" title="Cliquer pour déplier">…</td>`;
+    } else {
+      if (editMode) {
+        html += `<td>${dossierPourCell(rec)}</td>`;
+        html += `<td>${refListConfigs.Sous_direction.isRefList ? refListFieldHtml('Sous_direction', rec) : textFieldHtml('Sous_direction', rec.Sous_direction)}</td>`;
+		html += `<td>${refListConfigs.Bureau_competent.isRefList ? refListFieldHtml('Bureau_competent', rec) : textFieldHtml('Bureau_competent', rec.Bureau_competent)}</td>`;
+        html += `<td>${etatCell(rec)}</td>`;
+      } else {
+        html += `<td>${staticFieldHtml(rec.Dossier_pour)}</td>`;
+        html += `<td>${staticRefListHtml('Sous_direction', rec)}</td>`;
+        html += `<td>${staticRefListHtml('Bureau_competent', rec)}</td>`;
+        html += `<td>${staticFieldHtml(rec.Etat)}</td>`;
+      }
+    }
+    if (editMode) {
+      html += `<td class="col-obs">${textFieldHtml('Observation', rec.Observation)}</td>`;
+      html += `<td class="col-recu">${recuCell(rec)}</td>`;
+    } else {
+      html += `<td class="col-obs">${staticFieldHtml(rec.Observation)}</td>`;
+      html += `<td class="col-recu">${staticRecuHtml(rec)}</td>`;
+    }
+    html += `<td class="col-actions">
+      <button type="button" class="del-btn" title="Supprimer cette ligne">✕</button>
+    </td>`;
+    html += `</tr>`;
+
+    // Ligne interstitielle "+" (entre cette ligne et la suivante, ou en bas de liste)
+    const nextRec = visibles[idx + 1] || null;
+    const sameGroup = !!(nextRec && dateKeys[idx] !== null && dateKeys[idx + 1] === dateKeys[idx]);
+    html += renderAddRow(rec, nextRec, sameGroup, nbColonnes);
+  }
+  html += '</tbody></table>';
+  pr.tHtml = performance.now();
+  wrap.innerHTML = html;
+  pr.tDom = performance.now();
+  attachHandlers();
+  pr.tHandlers = performance.now();
+  syncStickyHeaderOffsets();
+  syncStickyLeftOffsets();
+  pr.tEnd = performance.now();
+  if (PERF_LOG){
+    const ms = (a, b) => Math.round(b - a);
+    const chips = (html.match(/reflist-chip/g) || []).length;
+    const refs = REFLIST_COLUMNS.map(c => `${c}:${refListConfigs[c].rawRefs.size}`).join(' ');
+    perfLog(`RENDER #${pr.n} : ${visibles.length} lignes | préparation ${ms(pr.t0, pr.tPrep)} ms | construction HTML ${ms(pr.tPrep, pr.tHtml)} ms (${html.length} car., ${chips} puces) | innerHTML ${ms(pr.tHtml, pr.tDom)} ms | écouteurs ${ms(pr.tDom, pr.tHandlers)} ms | sync sticky (force la mise en page) ${ms(pr.tHandlers, pr.tEnd)} ms | TOTAL ${ms(pr.t0, pr.tEnd)} ms | rawRefs chargées → ${refs}`);
+    requestAnimationFrame(() => setTimeout(() => perfLog(`RENDER #${pr.n} : peint à l'écran ~${ms(pr.t0, performance.now())} ms après son début`), 0));
+  }
+  // syncRowFieldHeights(); // plus nécessaire : le tableau n'a plus de champs
+                            // de formulaire à étirer, seulement du texte statique.
+}
+
+// ---------- Alignement précis des 3 lignes d'en-tête sticky ----------
+// Les décalages "top" en CSS (0 / 33px / 66px) ne sont qu'une approximation :
+// la hauteur réelle des lignes dépend de la police, du padding effectivement
+// rendu, des bordures, etc., et peut varier légèrement selon le navigateur.
+// On mesure donc les hauteurs réelles après rendu et on fixe le "top" de
+// chaque ligne d'en-tête en conséquence, pour que les colonnes fusionnées
+// (Observations / Reçu / Actions, en rowspan=3) restent parfaitement
+// alignées avec les colonnes non fusionnées lors du défilement.
+function syncStickyHeaderOffsets(){
+  const theadRows = document.querySelectorAll('#table-wrap table thead tr');
+  if (theadRows.length < 3) return;
+
+  const row1 = theadRows[0];
+  const row2 = theadRows[1];
+
+  const h1 = row1.getBoundingClientRect().height;
+  const h2 = row2.getBoundingClientRect().height;
+
+  row2.querySelectorAll('th').forEach(th => { th.style.top = `${h1}px`; });
+  theadRows[2].querySelectorAll('th').forEach(th => { th.style.top = `${h1 + h2}px`; });
+  // La ligne 1 (et les cellules en rowspan=3 qui y démarrent) reste à 0.
+  row1.querySelectorAll('th').forEach(th => { th.style.top = '0px'; });
+}
+
+window.addEventListener('resize', () => {
+  clearTimeout(window.__resizeTimer);
+  window.__resizeTimer = setTimeout(() => {
+    if (updateIsMobileView()){
+      render(); // le nombre de colonnes change (colonne "Jour"), on reconstruit tout
+    } else {
+      syncStickyHeaderOffsets(); syncStickyLeftOffsets(); /* syncRowFieldHeights(); */
+    }
+  }, 150);
+});
+
+// ---------- Vue mobile : pas de colonne "Jour" séparée ----------
+// En dessous de ce seuil, le nom du jour est affiché au-dessus de la date
+// plutôt que dans sa propre colonne (cf. render()).
+const MOBILE_MEDIA_QUERY = window.matchMedia('(max-width: 600px)');
+function updateIsMobileView(){
+  const wasMobile = isMobileView;
+  isMobileView = MOBILE_MEDIA_QUERY.matches;
+  return isMobileView !== wasMobile;
+}
+updateIsMobileView(); // état initial, avant le tout premier rendu
+
+// ---------- Colonnes figées horizontalement (Créneau + Nature du RDV) ----------
+// Comme pour les décalages "top", les largeurs réelles des colonnes dépendent
+// du contenu et de la police ; on les mesure donc après rendu à partir de la
+// 3e ligne d'en-tête (qui contient toujours une cellule individuelle par
+// colonne, y compris quand les blocs Dossier/Participation sont repliés).
+function syncStickyLeftOffsets(){
+  const table = document.querySelector('#table-wrap table');
+  if (!table) return;
+  const row3 = table.querySelectorAll('thead tr')[2];
+  if (!row3) return;
+
+  const thJour = row3.querySelector('.col-jour');   // absent en vue mobile
+  const thDate = row3.querySelector('.col-date');
+  const thHeure = row3.querySelector('.col-heure');
+  const thIntitule = row3.querySelector('.th-nature-sub');
+  if (!thDate || !thHeure || !thIntitule) return;
+
+  const wJour = thJour ? thJour.getBoundingClientRect().width : 0;
+  const wDate = thDate.getBoundingClientRect().width;
+  const wHeure = thHeure.getBoundingClientRect().width;
+
+  const lJour = 0;
+  const lDate = lJour + wJour;
+  const lHeure = lDate + wDate;
+  const lIntitule = lHeure + wHeure;
+
+  // En-têtes fusionnées (lignes 1 et 2) : Créneau démarre à 0, Nature du RDV à lIntitule
+  document.querySelectorAll('.th-creneau-header, .th-creneau-sub').forEach(el => { el.style.left = '0px'; });
+  document.querySelectorAll('.th-nature-header, .th-nature-sub').forEach(el => { el.style.left = `${lIntitule}px`; });
+
+  // Ligne 3 (une cellule par colonne)
+  if (thJour) thJour.style.left = `${lJour}px`;
+  thDate.style.left = `${lDate}px`;
+  thHeure.style.left = `${lHeure}px`;
+  thIntitule.style.left = `${lIntitule}px`;
+
+  // Corps du tableau
+  document.querySelectorAll('tbody td.col-jour').forEach(el => { el.style.left = `${lJour}px`; });
+  document.querySelectorAll('tbody td.col-date').forEach(el => { el.style.left = `${lDate}px`; });
+  document.querySelectorAll('tbody td.col-heure').forEach(el => { el.style.left = `${lHeure}px`; });
+  document.querySelectorAll('tbody td.col-intitule').forEach(el => { el.style.left = `${lIntitule}px`; });
+}
+
+// ---------- Repli / dépli des blocs de colonnes ----------
+function toggleGroup(name){
+  if (name === 'dossier') dossierCollapsed = !dossierCollapsed;
+  if (name === 'participation') participationCollapsed = !participationCollapsed;
+  render();
+}
+
+// ---------- Fiche (vue détaillée d'une ligne, utile sur petit écran) ----------
+function fieldRowHtml(label, inputHtml, extraClass){
+  return `<div class="fiche-field${extraClass ? ' ' + extraClass : ''}"><label>${escapeHtml(label)}</label><div class="fiche-input-wrap">${inputHtml}</div></div>`;
+}
+
+// ---------- Brouillon de la fiche ----------
+// Les modifications faites dans la fiche ne sont PAS envoyées à Grist au fil
+// de l'eau : elles sont mémorisées ici, puis envoyées en une seule fois par
+// le bouton "Valider" (un seul UpdateRecord contenant tous les champs).
+let ficheDraft = null; // { rowId, fields: {colId: valeur}, refs: {colId: [ids]} }
+
+function ficheHasPendingChanges(){
+  return !!ficheDraft && (Object.keys(ficheDraft.fields).length > 0 || Object.keys(ficheDraft.refs).length > 0);
+}
+function updateFicheDirtyState(){
+  document.getElementById('fiche-dirty').textContent = ficheHasPendingChanges() ? '● Modifications non validées' : '';
+}
+function ficheSetField(colId, value){
+  if (!ficheDraft) return;
+  ficheDraft.fields[colId] = value;
+  document.getElementById('fiche-error').textContent = '';
+  updateFicheDirtyState();
+}
+function ficheSetRefs(colId, ids){
+  if (!ficheDraft) return;
+  ficheDraft.refs[colId] = ids;
+  document.getElementById('fiche-error').textContent = '';
+  updateFicheDirtyState();
+}
+// Identifiants actuellement liés pour une colonne de référence : valeur du
+// brouillon si la fiche de cette ligne est ouverte et modifiée, sinon valeur
+// enregistrée dans Grist.
+function getRefIds(colId, rec){
+  if (ficheDraft && ficheDraft.rowId === rec.id && Object.prototype.hasOwnProperty.call(ficheDraft.refs, colId)){
+    return ficheDraft.refs[colId];
+  }
+  return refListConfigs[colId].rawRefs.get(rec.id) || [];
+}
+// Valeur à écrire dans Grist pour une colonne de référence : liste ["L", ...]
+// pour une RefList, entier brut (0 = vide) pour une Référence simple.
+function refCellValue(colId, ids){
+  const cfg = refListConfigs[colId];
+  if (cfg && cfg.isMultiple === false) return ids.length ? ids[ids.length - 1] : 0;
+  return ['L', ...ids];
+}
+function ficheUpdateDateHeure(newDatePart, newTimePart){
+  if (!ficheDraft) return;
+  const saved = allRecords.find(r => r.id === ficheDraft.rowId);
+  const cur = toDate(ficheDraft.fields.Date_RDV !== undefined ? ficheDraft.fields.Date_RDV : saved.Date_RDV) || new Date();
+  const [y,m,d] = (newDatePart || toInputDate(cur)).split('-').map(Number);
+  const [hh,mm] = (newTimePart || toInputTime(cur)).split(':').map(Number);
+  ficheSetField('Date_RDV', Math.floor(new Date(y, (m-1), d, hh, mm, 0, 0).getTime() / 1000));
+}
+
+// keepDraft = true : reconstruit la fiche en conservant les modifications en
+// cours (ex. après ajout/retrait d'une puce, pour recalculer les listes filtrées).
+function openFiche(rowId, keepDraft){
+  const saved = allRecords.find(r => r.id === rowId);
+  if (!saved) return;
+  if (!keepDraft || !ficheDraft || ficheDraft.rowId !== rowId){
+    ficheDraft = { rowId, fields: {}, refs: {} };
+    document.getElementById('fiche-error').textContent = '';
+  }
+  const prevScroll = document.getElementById('fiche-overlay').scrollTop;
+  // Vue = valeurs enregistrées + modifications du brouillon
+  const rec = Object.assign({}, saved, ficheDraft.fields);
+  const d = toDate(rec.Date_RDV);
+
+  let body = '';
+
+  // Zone 1 (sans titre) : Date RDV, Heure, Toute la journée, Jour férié sur
+  // une même ligne, puis Intitulé.
+  body += `<div class="fiche-row4">`;
+  body += fieldRowHtml('Date RDV', `<input type="date" class="fiche-date" value="${d ? toInputDate(d) : ''}">`);
+  body += fieldRowHtml('Heure', `<input type="time" class="fiche-heure" value="${d ? toInputTime(d) : ''}">`);
+  body += fieldRowHtml('Toute la journée', `<input type="checkbox" class="fiche-all-day" ${rec.IsAllDay ? 'checked' : ''}>`, 'fiche-field-centered');
+  body += fieldRowHtml('Jour férié', `<input type="checkbox" class="fiche-holiday" ${rec.IsHoliday ? 'checked' : ''}>`, 'fiche-field-centered');
+  body += `</div>`;
+  body += fieldRowHtml('Intitulé', `<textarea class="fiche-field-input" data-col="Intitule" rows="2">${escapeHtml(rec.Intitule)}</textarea>`);
+
+  // Zone "Participation"
+  body += `<div class="fiche-section"><div class="fiche-section-title">Participation</div>`;
+  body += `<div class="fiche-row3">`;
+  body += fieldRowHtml('Composition de la délégation', `<textarea class="fiche-field-input" data-col="Composition_delegation" rows="2">${escapeHtml(rec.Composition_delegation)}</textarea>`);
+  body += fieldRowHtml('Participation souhaitée (services)', refListConfigs.Participation_souhaitee.isRefList ? refListFieldHtml('Participation_souhaitee', rec) : `<textarea class="fiche-field-input" data-col="Participation_souhaitee" rows="2">${escapeHtml(rec.Participation_souhaitee)}</textarea>`);
+  body += fieldRowHtml('Participants désignés', refListConfigs.Participants_designes.isRefList ? refListFieldHtml('Participants_designes', rec) : `<textarea class="fiche-field-input" data-col="Participants_designes" rows="2">${escapeHtml(rec.Participants_designes)}</textarea>`);
+  body += `</div>`;
+  // Champ libre complémentaire : permet d'ajouter n'importe quel nom qui ne
+  // serait pas dans la table des Utilisateurs (colonne Autres_participants).
+  body += fieldRowHtml('Autres participants', `<textarea class="fiche-field-input" data-col="Autres_participants" rows="2">${escapeHtml(rec.Autres_participants)}</textarea>`);
+  body += `</div>`;
+
+  // Zone "Dossier" (Dossier pour, Sous-dir, Bureau compétent, Etat, Reçu)
+  body += `<div class="fiche-section"><div class="fiche-section-title">Dossier</div>`;
+  body += `<div class="fiche-row2">`;
+  body += fieldRowHtml('Dossier pour', dossierPourFicheHtml(rec));
+  body += fieldRowHtml('Sous-dir', refListConfigs.Sous_direction.isRefList ? refListFieldHtml('Sous_direction', rec) : `<textarea class="fiche-field-input" data-col="Sous_direction" rows="1">${escapeHtml(rec.Sous_direction)}</textarea>`);
+  body += `</div>`;
+  body += `<div class="fiche-row2">`;
+  body += fieldRowHtml('Bureau compétent', refListConfigs.Bureau_competent.isRefList ? refListFieldHtml('Bureau_competent', rec) : `<textarea class="fiche-field-input" data-col="Bureau_competent" rows="1">${escapeHtml(rec.Bureau_competent)}</textarea>`);
+  body += fieldRowHtml('Etat', etatFicheHtml(rec));
+  body += `</div>`;
+  body += fieldRowHtml('Reçu', hasRecuColumn === false
+    ? `<input type="checkbox" disabled>`
+    : `<input type="checkbox" class="fiche-recu" ${rec.Recu ? 'checked' : ''}>`);
+  body += `</div>`;
+
+  body += fieldRowHtml('Observations', `<textarea class="fiche-field-input" data-col="Observation" rows="3">${escapeHtml(rec.Observation)}</textarea>`);
+
+  const overlay = document.getElementById('fiche-overlay');
+  document.getElementById('fiche-title').textContent = d ? `${fmtJour(d)} ${fmtDate(d)} — ${fmtHeure(d)}` : 'Rendez-vous';
+  document.getElementById('fiche-body').innerHTML = body;
+  overlay.dataset.rowId = rowId;
+  overlay.classList.remove('hidden');
+  overlay.scrollTop = prevScroll;
+  updateFicheDirtyState();
+  attachFicheHandlers(rowId);
+}
+
+function dossierPourFicheHtml(rec){
+  const val = rec.Dossier_pour ?? '';
+  if (dossierChoices && dossierChoices.length){
+    let opts = `<option value=""></option>`;
+    for (const c of dossierChoices){
+      opts += `<option value="${escapeAttr(c)}" ${c===val?'selected':''}>${escapeHtml(c)}</option>`;
+    }
+    return `<select class="fiche-field-input" data-col="Dossier_pour">${opts}</select>`;
+  }
+  return `<textarea class="fiche-field-input" data-col="Dossier_pour" rows="1">${escapeHtml(val)}</textarea>`;
+}
+
+function etatFicheHtml(rec){
+  const val = rec.Etat ?? '';
+  if (etatChoices && etatChoices.length){
+    let opts = `<option value=""></option>`;
+    for (const c of etatChoices){
+      opts += `<option value="${escapeAttr(c)}" ${c===val?'selected':''}>${escapeHtml(c)}</option>`;
+    }
+    return `<select class="fiche-field-input" data-col="Etat">${opts}</select>`;
+  }
+  return `<textarea class="fiche-field-input" data-col="Etat" rows="1">${escapeHtml(val)}</textarea>`;
+}
+
+// ---------- Impression A4 de la fiche ----------
+// Ouvre une fenêtre dédiée avec le contenu de la fiche, éditable (contenteditable)
+// avant impression, plutôt que d'imprimer une feuille cachée dans la page.
+function printFiche(){
+  const overlay = document.getElementById('fiche-overlay');
+  const rowId = Number(overlay.dataset.rowId);
+  const saved = allRecords.find(r => r.id === rowId);
+  if (!saved) return;
+  // On imprime ce qui est affiché dans la fiche, y compris les modifications non validées
+  const rec = Object.assign({}, saved, (ficheDraft && ficheDraft.rowId === rowId) ? ficheDraft.fields : {});
+  const d = toDate(rec.Date_RDV);
+
+  // Participants désignés : noms des puces (référence) ou texte brut en repli
+  let participants = [];
+  const cfg = refListConfigs.Participants_designes;
+  if (cfg.isRefList){
+    participants = getRefIds('Participants_designes', rec).map(id => cfg.entityNameById.get(id) || `#${id}`);
+  } else if (rec.Participants_designes){
+    participants = [String(rec.Participants_designes)];
+  }
+  if (rec.Autres_participants) participants.push(String(rec.Autres_participants));
+
+  // Date + heure sur la même ligne, en haut à droite
+  const dateHeureTexte = d
+    ? `${escapeHtml(fmtDateLongue(d))} ${typeof fmtHeure === 'function' ? escapeHtml(fmtHeure(d)) : ''}`.trim()
+    : '';
+
+  const htmlContent = `
+    <!DOCTYPE html>
+    <html lang="fr">
+    <head>
+      <meta charset="UTF-8">
+      <title>Prévisualisation & Modification - ${escapeHtml(rec.Intitule || 'Fiche')}</title>
+      <style>
+        body {
+          font-family: system-ui, -apple-system, sans-serif;
+          margin: 20px;
+          line-height: 1.5;
+        }
+        .no-print {
+          background: #f0f4f8;
+          padding: 12px;
+          margin-bottom: 20px;
+          border-radius: 6px;
+          display: flex;
+          gap: 10px;
+          align-items: center;
+        }
+        .btn {
+          background: #0066cc;
+          color: white;
+          border: none;
+          padding: 8px 16px;
+          border-radius: 4px;
+          cursor: pointer;
+          font-weight: bold;
+        }
+        .btn:hover { background: #0052a3; }
+
+        /* Styles des tableaux et espacement */
+        .print-table {
+          width: 100%;
+          border-collapse: collapse;
+          margin-bottom: 60px;
+          table-layout: fixed;
+        }
+        .print-table th, .print-table td {
+          border: 1px solid #ccc;
+          padding: 10px;
+          text-align: left;
+          vertical-align: top;
+        }
+        .print-table-head { background-color: #f5f5f5; }
+
+        /* Colonnes de même taille pour le tableau d'en-tête */
+        .print-table-header td {
+          width: 50%;
+        }
+        /* Alignement à droite pour la cellule de date/heure */
+        .print-table-header td:last-child {
+          text-align: right;
+        }
+
+        /* Titre H1 centré avec espaces avant/après */
+        h1 {
+          text-align: center;
+          margin-top: 60px;
+          margin-bottom: 60px;
+        }
+
+        /* Édition interactive */
+        [contenteditable]:hover { background-color: #fafafa; outline: 1px dashed #999; }
+        [contenteditable]:focus { background-color: #fff; outline: 2px solid #0066cc; }
+
+        /* Gestion de l'impression */
+        @media print {
+          .no-print { display: none !important; }
+          [contenteditable] { outline: none !important; }
+        }
+      </style>
+    </head>
+    <body>
+      <div class="no-print">
+        <button class="btn" onclick="window.print()">🖨️ Imprimer / Exporter en PDF</button>
+        <span>💡 Vous pouvez cliquer directement dans les textes ci-dessous pour les modifier avant impression.</span>
+      </div>
+
+      <!-- Zone éditable -->
+      <div contenteditable="true">
+        <table class="print-table print-table-header">
+          <tbody><tr>
+            <td>${escapeHtml(rec.Dossier_pour)}</td>
+            <td>${dateHeureTexte}</td>
+          </tr></tbody>
+        </table>
+
+        <h1>${escapeHtml(rec.Intitule)}</h1>
+
+        <table class="print-table print-table-body">
+          <thead class="print-table-head"><tr><th>Composition de la délégation</th><th>Participants</th></tr></thead>
+          <tbody><tr>
+            <td style="white-space: pre-wrap;">${escapeHtml(rec.Composition_delegation)}</td>
+            <td style="white-space: pre-wrap;">${escapeHtml(participants.join('\n'))}</td>
+          </tr></tbody>
+        </table>
+
+        <table class="print-table print-table-body">
+          <thead class="print-table-head"><tr><th>Observations</th></tr></thead>
+          <tbody><tr><td style="white-space: pre-wrap;">${escapeHtml(rec.Observation)}</td></tr></tbody>
+        </table>
+      </div>
+    </body>
+    </html>
+  `;
+
+  const printWindow = window.open('', '_blank');
+  if (!printWindow) {
+    setStatut("Veuillez autoriser les pop-ups pour afficher le document d'impression.", true);
+    return;
+  }
+  printWindow.document.open();
+  printWindow.document.write(htmlContent);
+  printWindow.document.close();
+}
+
+function closeFiche(){
+  document.getElementById('fiche-overlay').classList.add('hidden');
+  ficheDraft = null;
+  updateFicheDirtyState();
+  document.getElementById('fiche-error').textContent = '';
+}
+
+// Fermeture demandée par l'utilisateur (✕, Annuler, clic à côté, Échap) :
+// on demande confirmation s'il reste des modifications non validées.
+function requestCloseFiche(){
+  if (document.getElementById('fiche-overlay').classList.contains('hidden')) return;
+  if (ficheHasPendingChanges() && !confirm('Abandonner les modifications non validées ?')) return;
+  closeFiche();
+}
+
+// Envoie toutes les modifications de la fiche en une seule action Grist.
+async function validateFiche(){
+  if (!ficheDraft) return;
+  const rowId = ficheDraft.rowId;
+  const changes = Object.assign({}, ficheDraft.fields);
+  for (const [colId, ids] of Object.entries(ficheDraft.refs)) changes[colId] = refCellValue(colId, ids);
+  if (!Object.keys(changes).length){ closeFiche(); return; }
+
+  const btn = document.querySelector('#fiche-card .fiche-validate');
+  btn.disabled = true;
+  try{
+    await grist.docApi.applyUserActions([['UpdateRecord', TABLE_ID, rowId, changes]]);
+    setStatut('Enregistré ✓', false);
+    hideWriteError();
+    closeFiche();
+  }catch(e){
+    console.error(e);
+    setStatut("Échec de l'enregistrement", true);
+    // La fiche recouvre le bandeau d'erreur : on affiche l'erreur dans la fiche,
+    // et on garde le brouillon pour que l'utilisateur puisse réessayer.
+    document.getElementById('fiche-error').textContent = writeErrorText(e, 'modifier cette ligne');
+  }finally{
+    btn.disabled = false;
+  }
+}
+
+// Si la fiche est actuellement ouverte, la reconstruit avec les dernières
+// données connues (utile notamment quand Participation_souhaitee vient de
+// changer : la liste disponible pour Participants_designes doit se mettre
+// à jour sans que l'utilisateur ait à fermer/rouvrir la fiche).
+function refreshOpenFicheIfAny(){
+  const overlay = document.getElementById('fiche-overlay');
+  if (overlay.classList.contains('hidden')) return;
+  if (ficheHasPendingChanges()) return; // ne jamais écraser des modifications en cours
+  const rowId = Number(overlay.dataset.rowId);
+  if (allRecords.some(r => r.id === rowId)) openFiche(rowId);
+}
+
+function attachFicheHandlers(rowId){
+  const overlay = document.getElementById('fiche-overlay');
+
+  const dateEl = overlay.querySelector('.fiche-date');
+  if (dateEl) dateEl.addEventListener('change', e => ficheUpdateDateHeure(e.target.value, null));
+
+  const heureEl = overlay.querySelector('.fiche-heure');
+  if (heureEl) heureEl.addEventListener('change', e => ficheUpdateDateHeure(null, e.target.value));
+
+  // Aucun envoi à Grist ici : on ne fait que mémoriser dans le brouillon.
+  overlay.querySelectorAll('.fiche-field-input').forEach(inp => {
+    const memo = e => ficheSetField(e.target.dataset.col, e.target.value);
+    inp.addEventListener('input', memo);
+    inp.addEventListener('change', memo);
+  });
+
+  // Chaque zone de texte s'agrandit pour afficher l'intégralité de son
+  // contenu, quelle que soit sa longueur, plutôt que de le tronquer/scroller.
+  overlay.querySelectorAll('textarea.fiche-field-input').forEach(ta => {
+    ficheAutoGrow(ta);
+    ta.addEventListener('input', () => ficheAutoGrow(ta));
+  });
+
+  const recuEl = overlay.querySelector('.fiche-recu');
+  if (recuEl) recuEl.addEventListener('change', e => ficheSetField('Recu', e.target.checked));
+
+  const allDayEl = overlay.querySelector('.fiche-all-day');
+  if (allDayEl) allDayEl.addEventListener('change', e => ficheSetField('IsAllDay', e.target.checked));
+
+  const holidayEl = overlay.querySelector('.fiche-holiday');
+  if (holidayEl) holidayEl.addEventListener('change', e => ficheSetField('IsHoliday', e.target.checked));
+
+  attachReflistHandlers(overlay, rowId);
+}
+
+function ficheAutoGrow(el){
+  el.style.height = 'auto';
+  el.style.height = `${el.scrollHeight}px`;
+}
+
+// ---------- Colonnes RefList : "chips" + sélecteur d'ajout ----------
+// colId : colonne concernée (Participation_souhaitee, Sous_direction...).
+// rowId : id de la ligne SuiviDG_DGA. Rend une boîte avec une puce par entité
+// ---------- Couleur des vignettes (puces) ----------
+// Calcule un attribut style="" (fond + texte contrasté) pour la puce d'une
+// entité donnée, à partir de la colonne "Couleur" détectée pour cette
+// colonne RefList (cf. REFLIST_COLOR_FIELD). Chaîne vide si pas de couleur
+// configurée/trouvée pour cette entité — la puce garde alors son style par défaut.
+function readableTextColor(hex){
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex);
+  if (!m) return '#1e1e1e';
+  const n = parseInt(m[1], 16);
+  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  const luminance = (0.299*r + 0.587*g + 0.114*b) / 255;
+  return luminance > 0.6 ? '#1e1e1e' : '#fff';
+}
+function chipColorStyle(colId, entityId){
+  const cfg = refListConfigs[colId];
+  if (!cfg || !cfg.colorById) return '';
+  // Si l'entité n'a pas de couleur propre, on remonte la hiérarchie
+  // (via entitesParentById) jusqu'à en trouver une, ou jusqu'en haut.
+  let current = entityId;
+  let raw = null;
+  const seen = new Set(); // garde-fou anti-boucle si la hiérarchie est mal formée
+  while (current != null && !seen.has(current)){
+    seen.add(current);
+    raw = cfg.colorById.get(current);
+    if (raw) break;
+    current = entitesParentById.get(current);
+  }
+  if (!raw) return '';
+  const isHex = /^#?[0-9a-f]{6}$/i.test(raw);
+  const bg = isHex ? (raw.startsWith('#') ? raw : `#${raw}`) : raw;
+  const text = isHex ? readableTextColor(bg) : '#1e1e1e';
+  return ` style="background-color:${escapeAttr(bg)};border-color:${escapeAttr(bg)};color:${text};"`;
+}
+
+// ---------- Colonnes RefList : "chips" + sélecteur d'ajout ----------
+// colId : colonne concernée (Participation_souhaitee, Sous_direction,
+// Participants_designes...). rec : enregistrement complet de la ligne (pas
+// seulement son id) — nécessaire pour les filtres dynamiques qui dépendent
+// d'un autre champ de la même ligne (cf. REFLIST_DYNAMIC_AVAILABLE). Rend
+// une boîte avec une puce par entité déjà liée (bouton × pour retirer) et
+// une liste déroulante pour en ajouter.
+function refListFieldHtml(colId, rec){
+  const cfg = refListConfigs[colId];
+  const rowId = rec.id;
+  const currentIds = getRefIds(colId, rec);
+  const chips = currentIds.map(id => {
+    const name = cfg.entityNameById.get(id) || `#${id}`;
+    return `<span class="reflist-chip"${chipColorStyle(colId, id)}>${escapeHtml(name)}<button type="button" class="reflist-chip-remove" data-entity-id="${id}" title="Retirer">×</button></span>`;
+  }).join('');
+
+  const dynamicFilter = REFLIST_DYNAMIC_AVAILABLE[colId];
+  const available = dynamicFilter
+    ? dynamicFilter(cfg, rec, currentIds)
+    : cfg.entities.filter(e => !currentIds.includes(e.id));
+
+  const placeholder = cfg.isMultiple === false ? '+ Choisir…' : '+ Ajouter…';
+  const options = `<option value="">${placeholder}</option>` +
+    available.map(e => `<option value="${e.id}">${escapeHtml(e.name)}</option>`).join('');
+
+  return `<div class="reflist-box" data-row-id="${rowId}" data-col-id="${colId}">
+    <div class="reflist-chips">${chips}</div>
+    <select class="reflist-add">${options}</select>
+  </div>`;
+}
+
+function dossierPourCell(rec){
+  const val = rec.Dossier_pour ?? '';
+  if (dossierChoices && dossierChoices.length){
+    let opts = `<option value=""></option>`;
+    for (const c of dossierChoices){
+      opts += `<option value="${escapeAttr(c)}" ${c===val?'selected':''}>${escapeHtml(c)}</option>`;
+    }
+    return `<select class="f-dossier">${opts}</select>`;
+  }
+  return `<textarea class="f-text" data-col="Dossier_pour" rows="1">${escapeHtml(val)}</textarea>`;
+}
+
+function etatCell(rec){
+  const val = rec.Etat ?? '';
+  if (etatChoices && etatChoices.length){
+    let opts = `<option value=""></option>`;
+    for (const c of etatChoices){
+      opts += `<option value="${escapeAttr(c)}" ${c===val?'selected':''}>${escapeHtml(c)}</option>`;
+    }
+    return `<select class="f-etat">${opts}</select>`;
+  }
+  return `<textarea class="f-text" data-col="Etat" rows="1">${escapeHtml(val)}</textarea>`;
+}
+
+function recuCell(rec){
+  if (hasRecuColumn === false){
+    return `<input type="checkbox" disabled title="Ajoutez une colonne booléenne 'Recu' à la table pour activer cette case.">`;
+  }
+  const checked = rec.Recu ? 'checked' : '';
+  return `<input type="checkbox" class="f-recu" ${checked}>`;
+}
+
+// ---------- Champs génériques (formulaire — conservés pour la fiche) ----------
+// NB : ces champs ne sont plus utilisés dans le TABLEAU principal (voir
+// staticFieldHtml ci-dessous et son usage dans render()) ; ils restent
+// utilisés par la vue "fiche", qui reste, elle, pleinement éditable.
+function textFieldHtml(colName, value, rows){
+  return `<textarea class="f-text" data-col="${colName}" rows="${rows || 1}">${escapeHtml(value)}</textarea>`;
+}
+function dateFieldHtml(d){
+  return `<input type="date" class="f-date" value="${d ? toInputDate(d) : ''}">`;
+}
+function timeFieldHtml(d){
+  return `<input type="time" class="f-heure" value="${d ? toInputTime(d) : ''}">`;
+}
+// Si IsAllDay est coché, on affiche "Toute la journée" à la place de l'heure.
+function heureCellHtml(rec, d){
+  if (rec.IsAllDay) return `<div class="all-day-label">Toute la journée</div>`;
+  return timeFieldHtml(d);
+}
+
+// ---------- Champs statiques (affichage seul — utilisés dans le TABLEAU) ----------
+// Le tableau principal n'affiche plus aucun formulaire : chaque cellule montre
+// simplement la valeur, et toute modification se fait via la fiche (▤).
+function staticFieldHtml(value){
+  return `<div class="static-field">${escapeHtml(value)}</div>`;
+}
+function staticHeureHtml(rec, d){
+  if (rec.IsAllDay) return `<div class="all-day-label">Toute la journée</div>`;
+  return `<div class="static-field static-heure">${d ? fmtHeure(d) : ''}</div>`;
+}
+function staticDateHtml(d){
+  return `<div class="static-field static-date">${d ? fmtDate(d) : ''}</div>`;
+}
+function staticRecuHtml(rec){
+  if (hasRecuColumn === false) return `<div class="static-field static-recu">—</div>`;
+  return `<div class="static-field static-recu">${rec.Recu ? '✓' : ''}</div>`;
+}
+// Affichage en "puces" en lecture seule d'une colonne RefList (sans bouton
+// de suppression ni sélecteur d'ajout) — repli sur du texte simple si la
+// colonne n'est en fait pas une Ref/RefList.
+function staticRefListHtml(colId, rec){
+  const cfg = refListConfigs[colId];
+  if (!cfg.isRefList) return staticFieldHtml(rec[colId]);
+  const ids = cfg.rawRefs.get(rec.id) || [];
+  if (!ids.length) return `<div class="static-field"></div>`;
+  const chips = ids.map(id => {
+    const name = cfg.entityNameById.get(id) || `#${id}`;
+    return `<span class="reflist-chip reflist-chip-static"${chipColorStyle(colId, id)}>${escapeHtml(name)}</span>`;
+  }).join('');
+  return `<div class="static-field reflist-chips">${chips}</div>`;
+}
+
+function escapeAttr(v){ return escapeHtml(v).replace(/"/g,'&quot;'); }
+function escapeHtml(v){
+  if (v === null || v === undefined) return '';
+  return String(v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ---------- Ajustement automatique de la hauteur des zones de texte ----------
+function autoGrow(el){
+  el.style.height = 'auto';
+  el.style.height = el.scrollHeight + 'px';
+  syncRowFieldHeights(el.closest('tr'));
+}
+
+// ---------- Étirement des champs sur toute la hauteur de leur ligne ----------
+// Quand une cellule (typiquement "Intitulé") s'agrandit sur plusieurs lignes,
+// la ligne du tableau s'étire en conséquence (comportement natif des
+// tableaux HTML), mais les autres champs de cette même ligne gardaient
+// jusqu'ici leur propre hauteur naturelle (une seule ligne), laissant un
+// espace vide sous leur bordure. On les étire donc pour qu'ils occupent
+// toute la hauteur réelle de la ligne, comme le fait déjà "Intitulé".
+// scopeTr : la <tr> à traiter ; si omis, toutes les lignes du tableau.
+function syncRowFieldHeights(scopeTr){
+  const rows = scopeTr && scopeTr.matches && scopeTr.matches('tr[data-id]')
+    ? [scopeTr]
+    : document.querySelectorAll('#table-wrap tbody tr[data-id]');
+
+  rows.forEach(tr => {
+    const rowHeight = tr.getBoundingClientRect().height;
+    if (!rowHeight) return;
+    tr.querySelectorAll('td').forEach(td => {
+      // Les cellules fusionnées (rowspan Jour/Date) restent centrées sur
+      // toute la fusion : on ne les étire pas ligne par ligne.
+	  if (td.querySelector('.reflist-box')) return;
+      if (td.hasAttribute('rowspan')) return;
+      const el = td.querySelector(isMobileView ? '.f-text, .f-dossier, .f-etat' : '.f-text, .f-dossier, .f-etat, .f-date');
+      if (!el) return;
+      const cs = getComputedStyle(td);
+      const padV = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+      el.style.height = `${Math.max(0, rowHeight - padV)}px`;
+    });
+  });
+}
+
+// ---------- Écouteurs sur les champs éditables ----------
+// Met à jour la colonne Participation_souhaitee (référence multiple) en
+// ajoutant ou retirant un identifiant, puis écrit la nouvelle liste au
+// format CellValue standard d'une colonne Liste/RefList : ["L", id, id...].
+// (Le code ["r", tableId, ids] vu en lecture est la représentation d'un
+// RecordSet calculé par une formule ; ce n'est pas le format attendu en
+// écriture pour une colonne RefList stockée — on écrit donc en "L".)
+// Écrit la nouvelle liste d'identifiants pour une colonne de référence
+// donnée. Pour une vraie RefList (colId.isMultiple), on écrit au format
+// CellValue standard d'une colonne Liste : ["L", id, id...]. Pour une
+// Référence simple (une seule valeur), Grist attend un entier brut (ou 0
+// pour "vide"), pas une liste — on écrit donc uniquement le dernier id.
+function updateRefListValue(colId, rowId, newIds){
+  const cfg = refListConfigs[colId];
+  if (cfg && cfg.isMultiple === false){
+    updateField(rowId, colId, newIds.length ? newIds[newIds.length - 1] : 0);
+  } else {
+    updateField(rowId, colId, ['L', ...newIds]);
+  }
+}
+
+// Attache les écouteurs de toutes les boîtes de référence multiple présentes
+// dans un conteneur (une ligne du tableau, ou la fiche) — il peut y en avoir
+// plusieurs (Participation_souhaitee ET Sous_direction, par exemple).
+/*function attachReflistHandlers(container, rowId){
+  container.querySelectorAll('.reflist-box').forEach(box => {
+    const colId = box.dataset.colId;
+    const boxRowId = Number(box.dataset.rowId) || rowId;
+    const cfg = refListConfigs[colId];
+    if (!cfg) return;
+
+    const addSel = box.querySelector('.reflist-add');
+    if (addSel) addSel.addEventListener('change', e => {
+      const entityId = Number(e.target.value);
+      if (!entityId) return;
+      // Référence simple : le nouveau choix remplace l'ancien plutôt que de s'y ajouter.
+      const current = cfg.isMultiple === false ? [] : getRefIds(colId, { id: boxRowId });
+      ficheSetRefs(colId, [...current, entityId]);
+      openFiche(boxRowId, true); // recalcule les listes filtrées dépendantes
+    });
+
+    box.querySelectorAll('.reflist-chip-remove').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const entityId = Number(btn.dataset.entityId);
+        const current = getRefIds(colId, { id: boxRowId });
+        ficheSetRefs(colId, current.filter(id => id !== entityId));
+        openFiche(boxRowId, true);
+      });
+    });
+  });
+}*/
+function attachReflistHandlers(container, rowId){
+  container.querySelectorAll('.reflist-box').forEach(box => {
+    const colId = box.dataset.colId;
+    const boxRowId = Number(box.dataset.rowId) || rowId;
+    const cfg = refListConfigs[colId];
+    if (!cfg) return;
+
+    // La boîte est-elle dans la fiche (brouillon + bouton Valider)
+    // ou dans le tableau (écriture directe en mode édition rapide) ?
+    const inFiche = !!box.closest('#fiche-overlay');
+
+    const applyNewIds = newIds => {
+      if (inFiche){
+        ficheSetRefs(colId, newIds);
+        openFiche(boxRowId, true); // recalcule les listes filtrées dépendantes
+      } else {
+        updateRefListValue(colId, boxRowId, newIds);
+        // Grist renverra onRecords → render() automatique
+      }
+    };
+
+    const addSel = box.querySelector('.reflist-add');
+    if (addSel) addSel.addEventListener('change', e => {
+      const entityId = Number(e.target.value);
+      if (!entityId) return;
+      // Référence simple : le nouveau choix remplace l'ancien.
+      const current = cfg.isMultiple === false ? [] : getRefIds(colId, { id: boxRowId });
+      applyNewIds([...current, entityId]);
+    });
+
+    box.querySelectorAll('.reflist-chip-remove').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const entityId = Number(btn.dataset.entityId);
+        const current = getRefIds(colId, { id: boxRowId });
+        applyNewIds(current.filter(id => id !== entityId));
+      });
+    });
+  });
+}
+
+function attachHandlers(){
+  document.querySelectorAll('tbody tr[data-id]').forEach(tr => {
+    const rowId = Number(tr.dataset.id);
+    const rec = allRecords.find(r => r.id === rowId);
+
+    // -- Le tableau n'affiche plus de champs de formulaire : ces éléments
+    //    (.f-date, .f-heure, .f-text, .f-dossier, .f-etat, .f-recu,
+    //    .reflist-box) n'existent donc plus dans les lignes du tableau.
+    //    Ce code est conservé en commentaire pour référence / réactivation
+    //    facile ; l'édition se fait désormais uniquement via la fiche (▤),
+    //    qui a ses propres écouteurs dans attachFicheHandlers().
+    //
+    const fDate = tr.querySelector('.f-date');
+    if (fDate) fDate.addEventListener('change', e => updateDateHeure(rec, e.target.value, null));
+    
+    const fHeure = tr.querySelector('.f-heure');
+    if (fHeure) fHeure.addEventListener('change', e => updateDateHeure(rec, null, e.target.value));
+    
+    tr.querySelectorAll('.f-text').forEach(inp => {
+      autoGrow(inp);
+      inp.addEventListener('input', () => autoGrow(inp));
+      inp.addEventListener('change', e => updateField(rowId, e.target.dataset.col, e.target.value));
+    });
+    
+    const sel = tr.querySelector('.f-dossier');
+    if (sel) sel.addEventListener('change', e => updateField(rowId, 'Dossier_pour', e.target.value));
+    
+    const selEtat = tr.querySelector('.f-etat');
+    if (selEtat) selEtat.addEventListener('change', e => updateField(rowId, 'Etat', e.target.value));
+    
+    const recu = tr.querySelector('.f-recu');
+    if (recu) recu.addEventListener('change', e => updateField(rowId, 'Recu', e.target.checked));
+    
+    attachReflistHandlers(tr, rowId);
+
+    const delBtn = tr.querySelector('.del-btn');
+    if (delBtn) delBtn.addEventListener('click', () => deleteRow(rowId));
+
+    const ficheBtn = tr.querySelector('.fiche-btn');
+    if (ficheBtn) ficheBtn.addEventListener('click', () => openFiche(rowId));
+
+    tr.querySelectorAll('.grp-collapsed-cell').forEach(cell => {
+      cell.addEventListener('click', () => toggleGroup(cell.dataset.group));
+    });
+  });
+
+  document.querySelectorAll('.grp-toggle').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      toggleGroup(btn.dataset.group);
+    });
+  });
+
+  document.querySelectorAll('.grp-collapsed-head').forEach(th => {
+    th.addEventListener('click', () => toggleGroup(th.dataset.group));
+  });
+
+  document.querySelectorAll('.add-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const tr = btn.closest('tr');
+      const afterId = tr.dataset.after ? Number(tr.dataset.after) : null;
+      const beforeId = tr.dataset.before ? Number(tr.dataset.before) : null;
+      const recA = afterId !== null ? allRecords.find(r => r.id === afterId) : null;
+      const recB = beforeId !== null ? allRecords.find(r => r.id === beforeId) : null;
+      addRow(computeInsertDate(recA, recB));
+    });
+  });
+}
+
+// ---------- Switch edit mode ----------
+const sem = document.getElementById('switch-editmode');
+sem.addEventListener('click', () => {
+  editMode = !editMode;
+  sem.classList.toggle('on', editMode);
+  render();
+});
+document.getElementById('switch-label-editmode').addEventListener('click', () => sw.click());
+// ---------- Switch événements passés ----------
+const sw = document.getElementById('switch-passes');
+sw.addEventListener('click', () => {
+  showPast = !showPast;
+  sw.classList.toggle('on', showPast);
+  render();
+});
+document.getElementById('switch-label').addEventListener('click', () => sw.click());
+
+// ---------- Modale fiche : fermeture ----------
+document.querySelector('#fiche-card .fiche-close').addEventListener('click', requestCloseFiche);
+document.querySelector('#fiche-card .fiche-cancel').addEventListener('click', requestCloseFiche);
+document.querySelector('#fiche-card .fiche-validate').addEventListener('click', validateFiche);
+document.querySelector('#fiche-card .fiche-print').addEventListener('click', printFiche);
+document.getElementById('fiche-overlay').addEventListener('click', e => {
+  if (e.target.id === 'fiche-overlay') requestCloseFiche();
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') requestCloseFiche();
+});
+
+// ---------- Bandeau d'erreur d'écriture : fermeture ----------
+document.querySelector('#write-error-banner .write-error-close').addEventListener('click', hideWriteError);
+
+// ---------- Initialisation Grist ----------
+grist.ready({ requiredAccess: 'full' });
+
+perfLog('script chargé → grist.ready()');
+let perfLastRecords = null;
+grist.onRecords(records => {
+  const now = performance.now();
+  perfLog(`onRecords : ${records.length} lignes reçues${perfLastRecords ? ` (${Math.round(now - perfLastRecords)} ms après le précédent)` : ' (premier appel)'}`);
+  perfLastRecords = now;
+  allRecords = records;
+  const t = performance.now();
+  updateRawRefsFromRecords(records);
+  const badCols = findLabelRefColumns(records);
+  rawRefsFromRecordsOk = badCols.length === 0;
+  perfLog(`identifiants bruts extraits des records en ${Math.round(performance.now() - t)} ms (${rawRefsFromRecordsOk ? 'OK' : '⚠ libellés détectés dans : ' + badCols.join(', ') + ' → repli sur lecture de la table'})`);
+  render();
+  if (rawRefsFromRecordsOk){
+    refreshOpenFicheIfAny(); // garde la fiche ouverte synchronisée (ex: filtre Participants_designes)
+  } else {
+    refreshAllRefListRawRefs().then(() => { render(); refreshOpenFicheIfAny(); });
+  }
+}, { expandRefs: false }); // identifiants de lignes plutôt que libellés pour les références
+
+perfLog('initialisation : chargement des configurations…');
+Promise.all([
+  perfTimed('loadDossierChoices', () => loadDossierChoices()),
+  perfTimed('loadRefListConfig(Participation_souhaitee)', () => loadRefListConfig('Participation_souhaitee')),
+  perfTimed('loadRefListConfig(Sous_direction)', () => loadRefListConfig('Sous_direction')),
+  perfTimed('loadRefListConfig(Participants_designes)', () => loadRefListConfig('Participants_designes')),
+  perfTimed('loadRefListConfig(Bureau_competent)', () => loadRefListConfig('Bureau_competent')),
+])
+  .then(() => perfLog('configurations chargées'))
+  .then(() => perfTimed('loadEntitesHierarchy', () => loadEntitesHierarchy()))
+  .then(() => perfTimed('loadParticipantsUserEntites', () => loadParticipantsUserEntites()))
+  .then(() => {
+    // Les types des colonnes sont maintenant connus : on vérifie les records déjà reçus.
+    const badCols = findLabelRefColumns(allRecords);
+    rawRefsFromRecordsOk = badCols.length === 0;
+    perfLog(rawRefsFromRecordsOk ? 'vérification des identifiants bruts : OK' : `⚠ libellés détectés dans : ${badCols.join(', ')} → repli sur lecture de la table`);
+    return rawRefsFromRecordsOk ? null : refreshAllRefListRawRefs();
+  })
+  .then(() => { fetchCache.clear(); perfLog(`initialisation terminée (${perfFetchCount} lectures de tables au total) → render final`); if (allRecords.length) render(); });
+</script>
+</body>
+</html>
