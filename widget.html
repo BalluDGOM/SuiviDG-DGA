@@ -205,6 +205,16 @@
     display:grid;gap:12px;border:1px solid var(--gris-bordure);
     border-radius:6px;padding:12px;
   }
+  .section-dossier {
+    border-color: #70AD47;
+  }
+  .section-participation {
+    border-color: #FF5050;
+  }
+  .section-autre {
+    border-color: #8497B0;
+  }
+ 
   .fiche-section-title{
     font-size:12px;font-weight:700;color:var(--bleu-france);
     text-transform:uppercase;letter-spacing:.04em;
@@ -1482,7 +1492,7 @@ function openFiche(rowId, keepDraft){
   body += fieldRowHtml('Intitulé', `<textarea class="fiche-field-input" data-col="Intitule" rows="2">${escapeHtml(rec.Intitule)}</textarea>`);
 
   // Zone "Participation"
-  body += `<div class="fiche-section section"><div class="fiche-section-title">Participation</div>`;
+  body += `<div class="fiche-section section section-participation"><div class="fiche-section-title">Participation</div>`;
   body += `<div class="fiche-row3">`;
   body += fieldRowHtml('Composition de la délégation', `<textarea class="fiche-field-input" data-col="Composition_delegation" rows="2">${escapeHtml(rec.Composition_delegation)}</textarea>`);
   body += fieldRowHtml('Participation souhaitée (services)', refListConfigs.Participation_souhaitee.isRefList ? refListFieldHtml('Participation_souhaitee', rec) : `<textarea class="fiche-field-input" data-col="Participation_souhaitee" rows="2">${escapeHtml(rec.Participation_souhaitee)}</textarea>`);
@@ -1494,7 +1504,7 @@ function openFiche(rowId, keepDraft){
   body += `</div>`;
 
   // Zone "Dossier" (Dossier pour, Sous-dir, Bureau compétent, Etat, Reçu)
-  body += `<div class="fiche-section"><div class="fiche-section-title">Dossier</div>`;
+  body += `<div class="fiche-section section-dossier"><div class="fiche-section-title">Dossier</div>`;
   body += `<div class="fiche-row2">`;
   body += fieldRowHtml('Dossier pour', dossierPourFicheHtml(rec));
   body += fieldRowHtml('Sous-dir', refListConfigs.Sous_direction.isRefList ? refListFieldHtml('Sous_direction', rec) : `<textarea class="fiche-field-input" data-col="Sous_direction" rows="1">${escapeHtml(rec.Sous_direction)}</textarea>`);
@@ -1507,9 +1517,10 @@ function openFiche(rowId, keepDraft){
     ? `<input type="checkbox" disabled>`
     : `<input type="checkbox" class="fiche-recu" ${rec.Recu ? 'checked' : ''}>`);
   body += `</div>`;
-
+  body += `<div class="fiche-section section-autre">`;
   body += fieldRowHtml('Observations', `<textarea class="fiche-field-input" data-col="Observation" rows="3">${escapeHtml(rec.Observation)}</textarea>`);
-
+  body += `</div>`;
+  
   const overlay = document.getElementById('fiche-overlay');
   document.getElementById('fiche-title').textContent = d ? `${fmtJour(d)} ${fmtDate(d)} — ${fmtHeure(d)}` : 'Rendez-vous';
   document.getElementById('fiche-body').innerHTML = body;
