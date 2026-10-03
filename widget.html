@@ -39,6 +39,11 @@
     font-weight:700;color:var(--bleu-france);
     margin-right:auto;font-size:15px;letter-spacing:.02em;
   }
+  .topbar-print{
+    border:1px solid var(--bleu-france);background:#fff;color:var(--bleu-france);
+    border-radius:4px;padding:5px 12px;font:inherit;font-size:13px;cursor:pointer;
+  } 
+  .topbar-print:hover{background:var(--bleu-france);color:#fff;}
   .switch-wrap{display:flex;align-items:center;gap:8px;}
   .switch{
     position:relative;width:42px;height:24px;
@@ -54,6 +59,8 @@
   }
   .switch.on .knob{left:20px;}
   .switch-label{cursor:pointer;user-select:none;font-size:13px;}
+  .switch.disabled{opacity:.4;cursor:not-allowed;}
+  .switch-label.disabled{opacity:.5;cursor:not-allowed;}
   #count-masques{font-size:12px;color:var(--texte-clair);font-style:italic;}
   #statut{font-size:12px;color:var(--texte-clair);}
   #statut.err{color:var(--rouge-passe);font-weight:600;}
@@ -279,6 +286,13 @@
   .ferie-row-intitule{ color:var(--texte-clair);white-space:nowrap; }
   .ferie-row-actions{ margin-left:auto;display:flex;align-items:center;gap:4px;flex:none; }
   td.col-obs{min-width:220px;}
+  /* Colonne Etat : un mot n'est jamais coupé, la colonne s'élargit pour le contenir */
+  th.col-etat, td.col-etat, td.col-etat .static-field{
+    word-break:normal;
+    overflow-wrap:normal;
+  }
+  /* Mode édition rapide : la liste déroulante garde sa largeur naturelle */
+  td.col-etat select{ width:auto; min-width:100%; }
   td.col-intitule{min-width:200px;}
   .intitule-wrap{display:flex;align-items:flex-start;gap:5px;}
   .intitule-wrap .static-field{flex:1;min-width:0;}
@@ -409,6 +423,7 @@
     color:var(--bleu-france);font:inherit;cursor:pointer;
   }
   .add-btn-text:hover{background:var(--bleu-france);color:#fff;}
+  
 </style>
 </head>
 <body>
@@ -428,6 +443,7 @@
       <span class="switch-label" id="switch-label">Afficher les rendez-vous passés</span>
       <div class="switch" id="switch-passes"><div class="knob"></div></div>
     </div>
+    <button type="button" id="print-table-btn" class="topbar-print" title="Imprimer les rendez-vous affichés (A4 paysage)">🖨 Imprimer</button>
     <span id="statut"></span>
   </div>
   <div id="table-wrap">
@@ -1142,7 +1158,7 @@ function render(){
         <button type="button" class="grp-toggle" data-group="dossier" title="${dossierCollapsed?'Déplier':'Replier'} le bloc Dossier">${dossierToggleIcon}</button>
       </th>
       <th class="th-other" rowspan="3">Observations</th>
-      <th class="th-other" rowspan="3">Reçu</th>
+      <!--<th class="th-other" rowspan="3">Reçu</th>-->
       <th class="th-other" rowspan="3">Actions</th>
     </tr>
     <tr>
@@ -1180,7 +1196,7 @@ function render(){
   if (dossierCollapsed){
     html += `<th class="th-dossier-sub grp-collapsed-head" data-group="dossier" title="Cliquer pour déplier">Dossier</th>`;
   } else {
-    html += `<th class="th-dossier-sub">Dossier pour</th><th class="th-dossier-sub">Sous-dir</th><th class="th-dossier-sub">Bureau compétent</th><th class="th-dossier-sub">Etat</th>`;
+    html += `<th class="th-dossier-sub">Dossier pour</th><th class="th-dossier-sub">Sous-dir</th><th class="th-dossier-sub">Bureau compétent</th><th class="th-dossier-sub col-etat">Etat</th>`;
   }
 
   html += `</tr>
@@ -1275,15 +1291,15 @@ function render(){
         html += `<td>${staticFieldHtml(rec.Dossier_pour)}</td>`;
         html += `<td>${staticRefListHtml('Sous_direction', rec)}</td>`;
         html += `<td>${staticRefListHtml('Bureau_competent', rec)}</td>`;
-        html += `<td>${staticFieldHtml(rec.Etat)}</td>`;
+        html += `<td class="col-etat">${staticFieldHtml(rec.Etat)}</td>`;
       }
     }
     if (editMode) {
       html += `<td class="col-obs">${textFieldHtml('Observation', rec.Observation)}</td>`;
-      html += `<td class="col-recu">${recuCell(rec)}</td>`;
+      //html += `<td class="col-recu">${recuCell(rec)}</td>`;
     } else {
       html += `<td class="col-obs">${staticFieldHtml(rec.Observation)}</td>`;
-      html += `<td class="col-recu">${staticRecuHtml(rec)}</td>`;
+      //html += `<td class="col-recu">${staticRecuHtml(rec)}</td>`;
     }
     html += `<td class="col-actions">
       <button type="button" class="del-btn" title="Supprimer cette ligne">✕</button>
@@ -1513,9 +1529,9 @@ function openFiche(rowId, keepDraft){
   body += fieldRowHtml('Bureau compétent', refListConfigs.Bureau_competent.isRefList ? refListFieldHtml('Bureau_competent', rec) : `<textarea class="fiche-field-input" data-col="Bureau_competent" rows="1">${escapeHtml(rec.Bureau_competent)}</textarea>`);
   body += fieldRowHtml('Etat', etatFicheHtml(rec));
   body += `</div>`;
-  body += fieldRowHtml('Reçu', hasRecuColumn === false
+  /*body += fieldRowHtml('Reçu', hasRecuColumn === false
     ? `<input type="checkbox" disabled>`
-    : `<input type="checkbox" class="fiche-recu" ${rec.Recu ? 'checked' : ''}>`);
+    : `<input type="checkbox" class="fiche-recu" ${rec.Recu ? 'checked' : ''}>`);*/
   body += `</div>`;
   body += `<div class="fiche-section section-autre">`;
   body += fieldRowHtml('Observations', `<textarea class="fiche-field-input" data-col="Observation" rows="3">${escapeHtml(rec.Observation)}</textarea>`);
@@ -1776,8 +1792,8 @@ function attachFicheHandlers(rowId){
     ta.addEventListener('input', () => ficheAutoGrow(ta));
   });
 
-  const recuEl = overlay.querySelector('.fiche-recu');
-  if (recuEl) recuEl.addEventListener('change', e => ficheSetField('Recu', e.target.checked));
+  //const recuEl = overlay.querySelector('.fiche-recu');
+  //if (recuEl) recuEl.addEventListener('change', e => ficheSetField('Recu', e.target.checked));
 
   const allDayEl = overlay.querySelector('.fiche-all-day');
   if (allDayEl) allDayEl.addEventListener('change', e => ficheSetField('IsAllDay', e.target.checked));
@@ -1885,13 +1901,13 @@ function etatCell(rec){
   return `<textarea class="f-text" data-col="Etat" rows="1">${escapeHtml(val)}</textarea>`;
 }
 
-function recuCell(rec){
+/*function recuCell(rec){
   if (hasRecuColumn === false){
     return `<input type="checkbox" disabled title="Ajoutez une colonne booléenne 'Recu' à la table pour activer cette case.">`;
   }
   const checked = rec.Recu ? 'checked' : '';
   return `<input type="checkbox" class="f-recu" ${checked}>`;
-}
+}*/
 
 // ---------- Champs génériques (formulaire — conservés pour la fiche) ----------
 // NB : ces champs ne sont plus utilisés dans le TABLEAU principal (voir
@@ -1925,10 +1941,10 @@ function staticHeureHtml(rec, d){
 function staticDateHtml(d){
   return `<div class="static-field static-date">${d ? fmtDate(d) : ''}</div>`;
 }
-function staticRecuHtml(rec){
+/*function staticRecuHtml(rec){
   if (hasRecuColumn === false) return `<div class="static-field static-recu">—</div>`;
   return `<div class="static-field static-recu">${rec.Recu ? '✓' : ''}</div>`;
-}
+}*/
 // Affichage en "puces" en lecture seule d'une colonne RefList (sans bouton
 // de suppression ni sélecteur d'ajout) — repli sur du texte simple si la
 // colonne n'est en fait pas une Ref/RefList.
@@ -2108,8 +2124,8 @@ function attachHandlers(){
     const selEtat = tr.querySelector('.f-etat');
     if (selEtat) selEtat.addEventListener('change', e => updateField(rowId, 'Etat', e.target.value));
     
-    const recu = tr.querySelector('.f-recu');
-    if (recu) recu.addEventListener('change', e => updateField(rowId, 'Recu', e.target.checked));
+    /*const recu = tr.querySelector('.f-recu');
+    if (recu) recu.addEventListener('change', e => updateField(rowId, 'Recu', e.target.checked));*/
     
     attachReflistHandlers(tr, rowId);
 
@@ -2147,6 +2163,223 @@ function attachHandlers(){
   });
 }
 
+// ---------- Impression du tableau (A4 paysage) ----------
+// Mêmes règles de filtrage / tri que render() : rendez-vous non supprimés,
+// passés masqués si showPast est faux, lignes sans date en fin de liste.
+function getVisibleRecords(){
+  const today0 = startOfToday();
+  return allRecords
+    .filter(r => r.IsDeleted !== true)
+    .filter(r => { const d = toDate(r.Date_RDV); return !d || showPast || d >= today0; })
+    .sort((a,b) => {
+      const da = a.Date_RDV, db = b.Date_RDV;
+      if (da === null || da === undefined) return 1;
+      if (db === null || db === undefined) return -1;
+      return da - db;
+    });
+}
+function printTable(){
+  const recs = getVisibleRecords();
+  if (!recs.length){ setStatut('Aucun rendez-vous à imprimer.', true); return; }
+
+  const NB_COLS = 13;
+  const cell = v => `<td>${escapeHtml(v)}</td>`;
+
+  // Colonne de référence → puces colorées (même logique que l'écran :
+  // couleur propre de l'entité, sinon héritée de son parent).
+  // Repli sur le texte brut si la colonne n'est pas une Ref/RefList.
+  const refChips = (colId, rec) => {
+    const cfg = refListConfigs[colId];
+    if (!cfg.isRefList) return escapeHtml(rec[colId]);
+    return (cfg.rawRefs.get(rec.id) || []).map(id => {
+      const name = cfg.entityNameById.get(id) || `#${id}`;
+      return `<span class="chip"${chipColorStyle(colId, id)}>${escapeHtml(name)}</span>`;
+    }).join('');
+  };
+
+  // Fusion Jour / Date : lignes consécutives de même date (hors fériés)
+  const keys = recs.map(r => {
+    if (r.IsHoliday) return null;
+    const d = toDate(r.Date_RDV);
+    return d ? toInputDate(d) : null;
+  });
+  const spans = new Array(recs.length).fill(1);
+  const skip = new Array(recs.length).fill(false);
+  for (let i = 0; i < recs.length; ){
+    if (keys[i] === null){ i++; continue; }
+    let j = i + 1;
+    while (j < recs.length && keys[j] === keys[i]) j++;
+    spans[i] = j - i;
+    for (let k = i + 1; k < j; k++) skip[k] = true;
+    i = j;
+  }
+
+  let rows = '';
+  recs.forEach((rec, i) => {
+    const d = toDate(rec.Date_RDV);
+    if (rec.IsHoliday){
+      rows += `<tr class="ferie"><td colspan="${NB_COLS}"><b>${d ? escapeHtml(`${capitalize(fmtJour(d))} ${fmtDate(d)}`) : ''}</b>
+        &nbsp;<span class="ferie-badge">FÉRIÉ</span> ${escapeHtml(rec.Intitule)}</td></tr>`;
+      return;
+    }
+    const autres = rec.Autres_participants ? `<div>${escapeHtml(rec.Autres_participants)}</div>` : '';
+    rows += '<tr>';
+    if (!skip[i]){
+      const merged = spans[i] > 1;
+      const attrs = merged ? ` rowspan="${spans[i]}"` : '';
+      const cls = merged ? ' merged' : '';
+      rows += `<td class="jour${cls}"${attrs}>${d ? escapeHtml(capitalize(fmtJour(d))) : '—'}</td>`;
+      rows += `<td class="center${cls}"${attrs}>${d ? escapeHtml(fmtDate(d)) : ''}</td>`;
+    }
+    rows += `<td class="center">${rec.IsAllDay ? 'Toute la journée' : (d ? fmtHeure(d) : '')}</td>`;
+    rows += cell(rec.Intitule);
+    rows += cell(rec.Composition_delegation);
+    rows += `<td>${refChips('Participation_souhaitee', rec)}</td>`;
+    rows += `<td>${refChips('Participants_designes', rec)}${autres}</td>`;
+    rows += cell(rec.Dossier_pour);
+    rows += `<td>${refChips('Sous_direction', rec)}</td>`;
+    rows += `<td>${refChips('Bureau_competent', rec)}</td>`;
+    rows += cell(rec.Etat);
+    rows += cell(rec.Observation);
+    //rows += `<td class="center recu">${hasRecuColumn !== false && rec.Recu ? '✓' : ''}</td>`;
+    rows += '</tr>';
+  });
+
+  const htmlContent = `<!DOCTYPE html>
+<html lang="fr"><head><meta charset="UTF-8">
+<title>Suivi DG / DGA — ${escapeHtml(fmtDate(new Date()))}</title>
+<style>
+  @page { size: A4 landscape; margin: 10mm; }
+  /* Force l'impression des couleurs de fond (sinon les navigateurs les retirent) */
+  *{ -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  body{ font-family: system-ui, -apple-system, "Segoe UI", Arial, sans-serif; margin:16px; color:#1e1e1e; }
+  .no-print{ background:#f0f4f8; padding:10px 12px; margin-bottom:14px; border-radius:6px; display:flex; gap:10px; align-items:center; }
+  .btn{ background:#0066cc; color:#fff; border:none; padding:8px 16px; border-radius:4px; cursor:pointer; font-weight:bold; }
+  .btn:hover{ background:#0052a3; }
+  h1{ font-size:15px; margin:0 0 8px; }
+  table{ width:100%; border-collapse:collapse; table-layout:fixed; font-size:9.5px; }
+  th, td{ border:1px solid #999; padding:3px 4px; vertical-align:top; white-space:pre-wrap; word-break:break-word; }
+  thead{ display:table-header-group; }           /* en-tête répété à chaque page */
+  tr{ page-break-inside:avoid; }
+  td.center{ text-align:center; }
+  td.jour{ font-weight:700; }
+  td.merged{ background:#f6f6f6; vertical-align:middle; }
+  td.recu{ color:#18753c; font-weight:700; }
+  tr.ferie td{ background:#fff; }
+  .ferie-badge{ color:#d32f2f; font-weight:700; }
+
+  /* En-têtes : mêmes couleurs que l'écran */
+  thead th{ text-align:center; font-size:9px; }
+  thead tr:nth-child(1) th{ text-transform:uppercase; letter-spacing:.03em; }
+  .h-creneau{ background:#4472C4; color:#fff; }
+  .s-creneau{ background:#8EAADC; color:#1e1e1e; }
+  .h-nature{ background:#D0CECE; color:#1e1e1e; }
+  .s-nature{ background:#ECECEC; color:#1e1e1e; }
+  .h-participation{ background:#FF5050; color:#fff; }
+  .s-participation{ background:#F8CBAC; color:#1e1e1e; }
+  .h-dossier{ background:#70AD47; color:#fff; }
+  .s-dossier{ background:#A8D08E; color:#1e1e1e; }
+  .h-other{ background:#8497B0; color:#fff; }
+
+  /* Puces : la couleur propre à chaque entité arrive en style inline */
+  .chip{
+    display:inline-block; background:#f0f0f0; border:1px solid #ddd;
+    border-radius:10px; padding:0 6px; margin:1px 3px 1px 0; line-height:1.5;
+  }
+  @media print{ .no-print{ display:none !important; } body{ margin:0; } }
+</style></head>
+<body>
+  <div class="no-print">
+    <button class="btn" onclick="window.print()">🖨️ Imprimer</button>
+    <span>Format paysage (A4). Si besoin, choisissez « Paysage » dans la boîte de dialogue d'impression.</span>
+  </div>
+  <h1>Suivi DG / DGA — rendez-vous à partir du ${escapeHtml(fmtDate(startOfToday()))}</h1>
+  <table>
+    <colgroup>
+      <col style="width:6%"><col style="width:6%"><col style="width:5%"><col style="width:13%">
+      <col style="width:9%"><col style="width:8%"><col style="width:9%"><col style="width:6%">
+      <col style="width:7%"><col style="width:7%"><col style="width:5%"><col style="width:14%"><col style="width:3%">
+    </colgroup>
+    <thead>
+      <tr>
+        <th class="h-creneau" colspan="3">Créneau</th>
+        <th class="h-nature">Nature du RDV</th>
+        <th class="h-participation" colspan="3">Participation</th>
+        <th class="h-dossier" colspan="4">Dossier</th>
+        <th class="h-other" rowspan="3">Observations</th>
+        <th class="h-other" rowspan="3">Reçu</th>
+      </tr>
+      <tr>
+        <th class="s-creneau" colspan="3">Sec préfet</th>
+        <th class="s-nature">Sec préfet</th>
+        <th class="s-participation">Sec préfet</th><th class="s-participation">Cab DG</th><th class="s-participation">Sec ss-dir</th>
+        <th class="s-dossier">Cab DG</th><th class="s-dossier">Sec Cab DG</th><th class="s-dossier">Sec Sous-dir</th><th class="s-dossier">Cab DG</th>
+      </tr>
+      <tr>
+        <th class="s-creneau">Jour</th><th class="s-creneau">Date RDV</th><th class="s-creneau">Heure</th>
+        <th class="s-nature">Intitulé</th>
+        <th class="s-participation">Composition de la délégation</th><th class="s-participation">Participation souhaitée (services)</th><th class="s-participation">Participants désignés</th>
+        <th class="s-dossier">Dossier pour</th><th class="s-dossier">Sous-dir</th><th class="s-dossier">Bureau compétent</th><th class="s-dossier">Etat</th>
+      </tr>
+    </thead>
+    <tbody>${rows}</tbody>
+  </table>
+</body></html>`;
+
+  const w = window.open('', '_blank');
+  if (!w){
+    setStatut("Veuillez autoriser les pop-ups pour afficher le document d'impression.", true);
+    return;
+  }
+  w.document.open();
+  w.document.write(htmlContent);
+  w.document.close();
+}
+
+
+// ---------- Switches : mode édition rapide / rendez-vous passés ----------
+// Les deux modes sont mutuellement exclusifs : l'un actif désactive l'autre.
+const sem = document.getElementById('switch-editmode');
+const sw  = document.getElementById('switch-passes');
+const semLabel = document.getElementById('switch-label-editmode');
+const swLabel  = document.getElementById('switch-label');
+const printBtn = document.getElementById('print-table-btn');
+printBtn.addEventListener('click', printTable);
+
+function updateSwitchesState(){
+  sem.classList.toggle('on', editMode);
+  sw.classList.toggle('on', showPast);
+  // Édition rapide indisponible tant que les rendez-vous passés sont affichés, et inversement
+  sem.classList.toggle('disabled', showPast);
+  semLabel.classList.toggle('disabled', showPast);
+  sw.classList.toggle('disabled', editMode);
+  swLabel.classList.toggle('disabled', editMode);
+  sem.title = showPast ? 'Désactivez d\'abord l\'affichage des rendez-vous passés' : '';
+  sw.title  = editMode ? 'Désactivez d\'abord le mode édition rapide' : '';
+  printBtn.style.display = showPast ? 'none' : '';
+}
+
+function toggleEditMode(){
+  if (showPast) return; // désactivé
+  editMode = !editMode;
+  updateSwitchesState();
+  render();
+}
+
+function togglePast(){
+  if (editMode) return; // désactivé
+  showPast = !showPast;
+  updateSwitchesState();
+  render();
+  if (showPast) scrollToToday();
+}
+
+sem.addEventListener('click', toggleEditMode);
+semLabel.addEventListener('click', toggleEditMode);
+sw.addEventListener('click', togglePast);
+swLabel.addEventListener('click', togglePast);
+updateSwitchesState();
+/*
 // ---------- Switch edit mode ----------
 const sem = document.getElementById('switch-editmode');
 sem.addEventListener('click', () => {
@@ -2154,15 +2387,49 @@ sem.addEventListener('click', () => {
   sem.classList.toggle('on', editMode);
   render();
 });
-document.getElementById('switch-label-editmode').addEventListener('click', () => sw.click());
+document.getElementById('switch-label-editmode').addEventListener('click', () => sem.click());
 // ---------- Switch événements passés ----------
 const sw = document.getElementById('switch-passes');
 sw.addEventListener('click', () => {
   showPast = !showPast;
   sw.classList.toggle('on', showPast);
   render();
+  scrollToToday();
+  //if (showPast) scrollToToday();
 });
-document.getElementById('switch-label').addEventListener('click', () => sw.click());
+document.getElementById('switch-label').addEventListener('click', () => sw.click());*/
+
+// ---------- Positionnement sur "aujourd'hui" ----------
+// Place la première ligne datée d'aujourd'hui ou après juste sous l'en-tête
+// figé, puis remonte d'une ligne de rendez-vous pour qu'on voie qu'il y a
+// du contenu au-dessus.
+function scrollToToday(){
+  const wrap = document.getElementById('table-wrap');
+  const thead = wrap.querySelector('thead');
+  const today0 = startOfToday();
+
+  let cible = null;
+  for (const tr of wrap.querySelectorAll('tbody tr[data-id]')){
+    const rec = allRecords.find(r => r.id === Number(tr.dataset.id));
+    const d = rec ? toDate(rec.Date_RDV) : null;
+    if (d && d >= today0){ cible = tr; break; }
+  }
+  if (!cible) return; // aucun rendez-vous à venir : on ne bouge pas
+
+  const headH = thead ? thead.getBoundingClientRect().height : 0;
+  const wrapTop = wrap.getBoundingClientRect().top;
+
+  // 1) la ligne d'ancrage se place juste sous l'en-tête
+  wrap.scrollTop += cible.getBoundingClientRect().top - wrapTop - headH;
+
+  // 2) on remonte d'une ligne de rendez-vous (en sautant les lignes "+")
+  let prev = cible.previousElementSibling;
+  while (prev && !prev.dataset.id) prev = prev.previousElementSibling;
+  if (prev){
+    wrap.scrollTop -= cible.getBoundingClientRect().top - prev.getBoundingClientRect().top;
+  }
+}
+
 
 // ---------- Modale fiche : fermeture ----------
 document.querySelector('#fiche-card .fiche-close').addEventListener('click', requestCloseFiche);
