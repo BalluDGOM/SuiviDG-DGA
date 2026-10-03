@@ -2371,7 +2371,7 @@ function togglePast(){
   showPast = !showPast;
   updateSwitchesState();
   render();
-  if (showPast) scrollToToday();
+  scrollToToday();
 }
 
 sem.addEventListener('click', toggleEditMode);
