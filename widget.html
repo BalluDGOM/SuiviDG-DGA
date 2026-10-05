@@ -1268,11 +1268,9 @@ function render(){
     }
     if (editMode) {
      html += `<td class="freeze-col col-heure">${heureCellHtml(rec, d)}${stickerHtml(rec)}</td>`;
-     html += `<td class="freeze-col col-heure">${heureCellHtml(rec, d)}</td>`;
      html += `<td class="col-intitule freeze-col freeze-edge"><div class="intitule-wrap"><button type="button" class="fiche-btn" title="Voir en fiche">▤</button>${textFieldHtml('Intitule', rec.Intitule)}</div></td>`;
     } else {
      html += `<td class="freeze-col col-heure">${staticHeureHtml(rec, d)}${stickerHtml(rec)}</td>`;
-     html += `<td class="freeze-col col-heure">${staticHeureHtml(rec, d)}</td>`;
      html += `<td class="col-intitule freeze-col freeze-edge"><div class="intitule-wrap"><button type="button" class="fiche-btn" title="Voir en fiche">▤</button>${staticFieldHtml(rec.Intitule)}</div></td>`;
     }
     if (participationCollapsed){
