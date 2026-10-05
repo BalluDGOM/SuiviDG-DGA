@@ -138,6 +138,16 @@
   }
   .fiche-btn:hover{background:#e8e8fb;border-color:#c7c7f5;}
 
+  /* Pastilles « Nouveau » / « Modifié » sous l'horaire */
+  .sticker{
+    display:block;width:max-content;margin:3px auto 0;
+    padding:1px 7px;border-radius:10px;
+    font-size:10px;font-weight:700;line-height:1.5;
+    text-transform:uppercase;letter-spacing:.03em;white-space:nowrap;
+  }
+  .sticker-new{background:var(--vert-recu);color:#fff;}
+  .sticker-mod{background:var(--rouge-passe);color:#fff;}
+
   /* Modale "fiche" */
   #fiche-overlay{
     position:fixed;inset:0;background:rgba(0,0,0,.4);
@@ -1236,7 +1246,6 @@ function render(){
       // -- Ancien affichage en formulaire (conservé en commentaire) --
       if (editMode) {
        if (!isMobileView){
-      
         html += `<td class="col-jour freeze-col"${spanAttr}>${d ? fmtJour(d) : '—'}</td>`;
         html += `<td class="col-date freeze-col"${spanAttr}>${dateFieldHtml(d)}</td>`;
        } else {
@@ -1258,9 +1267,11 @@ function render(){
       }
     }
     if (editMode) {
+     html += `<td class="freeze-col col-heure">${heureCellHtml(rec, d)}${stickerHtml(rec)}</td>`;
      html += `<td class="freeze-col col-heure">${heureCellHtml(rec, d)}</td>`;
      html += `<td class="col-intitule freeze-col freeze-edge"><div class="intitule-wrap"><button type="button" class="fiche-btn" title="Voir en fiche">▤</button>${textFieldHtml('Intitule', rec.Intitule)}</div></td>`;
     } else {
+     html += `<td class="freeze-col col-heure">${staticHeureHtml(rec, d)}${stickerHtml(rec)}</td>`;
      html += `<td class="freeze-col col-heure">${staticHeureHtml(rec, d)}</td>`;
      html += `<td class="col-intitule freeze-col freeze-edge"><div class="intitule-wrap"><button type="button" class="fiche-btn" title="Voir en fiche">▤</button>${staticFieldHtml(rec.Intitule)}</div></td>`;
     }
@@ -1938,6 +1949,22 @@ function staticHeureHtml(rec, d){
   if (rec.IsAllDay) return `<div class="all-day-label">Toute la journée</div>`;
   return `<div class="static-field static-heure">${d ? fmtHeure(d) : ''}</div>`;
 }
+// ---------- Pastilles « Nouveau » / « Modifié » ----------
+// Nouveau : CreeLe a moins de 24 h. Modifié : ModifieLe a moins de 24 h.
+// Une ligne tout juste créée a aussi un ModifieLe récent : on n'affiche alors
+// que « Nouveau » pour ne pas doubler les pastilles.
+const STICKER_DELAI_MS = 24 * 3600 * 1000;
+function stickerHtml(rec){
+  const now = Date.now();
+  const recent = v => { const d = toDate(v); return !!d && (now - d.getTime()) < STICKER_DELAI_MS; };
+  if (recent(rec.CreeLe))    return `<span class="sticker sticker-new">Nouveau</span>`;
+  if (recent(rec.ModifieLe)) return `<span class="sticker sticker-mod">Modifié</span>`;
+  return '';
+}
+
+
+
+
 function staticDateHtml(d){
   return `<div class="static-field static-date">${d ? fmtDate(d) : ''}</div>`;
 }
