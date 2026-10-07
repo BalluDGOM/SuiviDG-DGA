@@ -1171,25 +1171,25 @@ function render(){
       <!--<th class="th-other" rowspan="3">Reçu</th>-->
       <th class="th-other" rowspan="3">Actions</th>
     </tr>
-    <tr>
+    <!-- <tr>
       <th class="th-creneau-sub freeze-col" colspan="${nbCreneauCols}">Sec préfet</th>
-      <th class="th-nature-sub freeze-col freeze-edge">Sec préfet</th>`;
+      <th class="th-nature-sub freeze-col freeze-edge">Sec préfet</th>-->`;
 
   if (participationCollapsed){
     html += `<th class="th-participation-sub">…</th>`;
   } else {
-    html += `<th class="th-participation-sub">Sec préfet</th>
+    html += `<!--<th class="th-participation-sub">Sec préfet</th>
       <th class="th-participation-sub">Cab DG</th>
-      <th class="th-participation-sub">Sec ss-dir</th>`;
+      <th class="th-participation-sub">Sec ss-dir</th>-->`;
   }
 
   if (dossierCollapsed){
     html += `<th class="th-dossier-sub">…</th>`;
   } else {
-    html += `<th class="th-dossier-sub">Cab DG</th>
+    html += `<!-- <th class="th-dossier-sub">Cab DG</th>
       <th class="th-dossier-sub">Sec Cab DG</th>
       <th class="th-dossier-sub">Sec Sous-dir</th>
-      <th class="th-dossier-sub">Cab DG</th>`;
+      <th class="th-dossier-sub">Cab DG</th>-->`;
   }
 
   html += `</tr>
@@ -2332,14 +2332,14 @@ function printTable(){
         <th class="h-participation" colspan="3">Participation</th>
         <th class="h-dossier" colspan="4">Dossier</th>
         <th class="h-other" rowspan="3">Observations</th>
-        <th class="h-other" rowspan="3">Reçu</th>
+        <!--<th class="h-other" rowspan="3">Reçu</th>-->
       </tr>
-      <tr>
+      <!--<tr>
         <th class="s-creneau" colspan="3">Sec préfet</th>
         <th class="s-nature">Sec préfet</th>
         <th class="s-participation">Sec préfet</th><th class="s-participation">Cab DG</th><th class="s-participation">Sec ss-dir</th>
         <th class="s-dossier">Cab DG</th><th class="s-dossier">Sec Cab DG</th><th class="s-dossier">Sec Sous-dir</th><th class="s-dossier">Cab DG</th>
-      </tr>
+      </tr>-->
       <tr>
         <th class="s-creneau">Jour</th><th class="s-creneau">Date RDV</th><th class="s-creneau">Heure</th>
         <th class="s-nature">Intitulé</th>
