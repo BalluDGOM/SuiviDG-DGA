@@ -44,6 +44,7 @@
     border-radius:4px;padding:5px 12px;font:inherit;font-size:13px;cursor:pointer;
   } 
   .topbar-print:hover{background:var(--bleu-france);color:#fff;}
+  .topbar-print.on{background:var(--bleu-france);color:#fff;}
   .switch-wrap{display:flex;align-items:center;gap:8px;}
   .switch{
     position:relative;width:42px;height:24px;
@@ -137,6 +138,13 @@
     transition:background .15s ease, border-color .15s ease;
   }
   .fiche-btn:hover{background:#e8e8fb;border-color:#c7c7f5;}
+  .fiche-reprog{
+    border:1px solid var(--rouge-passe);background:#fff;color:var(--rouge-passe);
+    border-radius:4px;padding:5px 12px;font:inherit;font-size:13px;cursor:pointer;
+  }
+  .fiche-reprog:hover{background:var(--rouge-passe);color:#fff;}
+  .fiche-btn-locked{color:var(--rouge-passe);cursor:not-allowed;}
+  .fiche-btn-locked:hover{background:transparent;border-color:transparent;}
 
   /* Pastilles « Nouveau » / « Modifié » sous l'horaire */
   .sticker{
@@ -453,6 +461,7 @@
       <span class="switch-label" id="switch-label">Afficher les rendez-vous passés</span>
       <div class="switch" id="switch-passes"><div class="knob"></div></div>
     </div>
+    <button type="button" id="undated-btn" class="topbar-print" title="Afficher uniquement les rendez-vous sans date">📅 À reprogrammer</button>
     <button type="button" id="print-table-btn" class="topbar-print" title="Imprimer les rendez-vous affichés (A4 paysage)">🖨 Imprimer</button>
     <span id="statut"></span>
   </div>
@@ -560,6 +569,7 @@ for (const colId of REFLIST_COLUMNS){
   };
 }
 let showPast = false;
+let showUndated = false;
 let editMode = false;
 let hasRecuColumn = null;  // true / false / null (inconnu tant que pas de données)
 let dossierCollapsed = false;
@@ -587,6 +597,13 @@ function fmtHeure(d){ return `${pad(d.getHours())}:${pad(d.getMinutes())}`; }
 function toInputDate(d){ return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; }
 function toInputTime(d){ return `${pad(d.getHours())}:${pad(d.getMinutes())}`; }
 function startOfToday(){ const d = new Date(); d.setHours(0,0,0,0); return d; }
+
+function updateUndatedBtn(activeRecords){
+  const btn = document.getElementById('undated-btn');
+  const n = activeRecords.filter(r => !toDate(r.Date_RDV)).length;
+  btn.textContent = `📅 À reprogrammer${n ? ` (${n})` : ''}`;
+  btn.classList.toggle('on', showUndated);
+}
 
 // ---------- Statut / erreurs ----------
 function setStatut(msg, isErr){
@@ -1051,7 +1068,13 @@ function computeInsertDate(recA, recB){
 async function addRow(dateObj){
   const ts = dateObj ? Math.floor(dateObj.getTime() / 1000) : null;
   try{
-    await grist.docApi.applyUserActions([['AddRecord', TABLE_ID, null, { Date_RDV: ts }]]);
+    const fields = { Date_RDV: ts };
+    if (editMode) fields.Verrou = true;
+    const res = await grist.docApi.applyUserActions([['AddRecord', TABLE_ID, null, fields]]);
+    if (editMode){
+      const newId = res && res.retValues && res.retValues[0];
+      if (newId) editLockedIds.add(newId);
+    }
     setStatut('Ligne ajoutée ✓', false);
     hideWriteError();
   }catch(e){
@@ -1100,6 +1123,13 @@ function renderAddRow(recA, recB, sameGroup, nbColonnes){
   </tr>`;
 }
 
+function ficheBtnHtml(rec){
+  // Verrou posé par notre propre mode édition rapide : la fiche reste accessible
+  const lockedByOther = rec.Verrou === true && !(editMode && editLockedIds.has(rec.id));
+  return lockedByOther
+    ? `<button type="button" class="fiche-btn fiche-btn-locked" title="Ligne en cours de modification">🔒</button>`
+    : `<button type="button" class="fiche-btn" title="Voir en fiche">▤</button>`;
+}
 // ---------- Rendu ----------
 function render(){
   const pr = { n: ++perfRenderCount, t0: performance.now() };
@@ -1107,6 +1137,7 @@ function render(){
 
   // Suppression logique : on ne travaille qu'avec les lignes non supprimées.
   const activeRecords = allRecords.filter(r => r.IsDeleted !== true);
+  updateUndatedBtn(activeRecords);
 
   if (!activeRecords.length){
     wrap.innerHTML = `<div id="empty">Aucun élément dans SuiviDG_DGA.<br>
@@ -1120,20 +1151,23 @@ function render(){
   hasRecuColumn = Object.prototype.hasOwnProperty.call(activeRecords[0], 'Recu');
 
   const today0 = startOfToday();
-  let visibles = activeRecords.filter(r => {
-    const d = toDate(r.Date_RDV);
-    if (!d) return true; // pas de date -> toujours visible, tri en fin de liste
-    if (showPast) return true;
-    return d >= today0;
-  });
+  let visibles = showUndated
+    ? activeRecords.filter(r => !toDate(r.Date_RDV))
+    : activeRecords.filter(r => {
+        const d = toDate(r.Date_RDV);
+        if (!d) return true;
+        if (showPast) return true;
+        return d >= today0;
+      });
 
-  const masques = activeRecords.length - visibles.length;
-  document.getElementById('count-masques').textContent =
-    masques > 0 ? `(${masques} rendez-vous passé${masques>1?'s':''} masqué${masques>1?'s':''})` : '';
+  const masques = showUndated ? 0 : activeRecords.length - visibles.length;
 
   if (!visibles.length){
-    wrap.innerHTML = `<div id="empty">Aucun rendez-vous à afficher (les rendez-vous passés sont masqués).<br>
-      <button type="button" id="add-first-btn" class="add-btn-text">+ Ajouter une ligne</button></div>`;
+    wrap.innerHTML = showUndated
+    ? `<div id="empty">Aucun rendez-vous à reprogrammer.</div>`
+    : `<div id="empty">Aucun rendez-vous à afficher (les rendez-vous passés sont masqués).<br>
+        <button type="button" id="add-first-btn" class="add-btn-text">+ Ajouter une ligne</button></div>`;
+
     const addFirstBtn = document.getElementById('add-first-btn');
     if (addFirstBtn) addFirstBtn.addEventListener('click', () => addRow(computeInsertDate(null, null)));
     return;
@@ -1228,7 +1262,7 @@ function render(){
           <span class="ferie-badge">FÉRIÉ</span>
           ${rec.Intitule ? `<span class="ferie-row-intitule">${escapeHtml(rec.Intitule)}</span>` : ''}
           <span class="ferie-row-actions">
-            <button type="button" class="fiche-btn" title="Voir en fiche">▤</button>
+            ${ficheBtnHtml(rec)}
             <button type="button" class="del-btn" title="Supprimer cette ligne">✕</button>
           </span>
         </div>
@@ -1236,7 +1270,8 @@ function render(){
       html += `</tr>`;
 
       const nextRec = visibles[idx + 1] || null;
-      html += renderAddRow(rec, nextRec, false, nbColonnes);
+      //html += renderAddRow(rec, nextRec, false, nbColonnes);
+      if (!showUndated) html += renderAddRow(rec, nextRec, false, nbColonnes);      
       continue;
     }
 
@@ -1268,10 +1303,10 @@ function render(){
     }
     if (editMode) {
      html += `<td class="freeze-col col-heure">${heureCellHtml(rec, d)}${stickerHtml(rec)}</td>`;
-     html += `<td class="col-intitule freeze-col freeze-edge"><div class="intitule-wrap"><button type="button" class="fiche-btn" title="Voir en fiche">▤</button>${textFieldHtml('Intitule', rec.Intitule)}</div></td>`;
+     html += `<td class="col-intitule freeze-col freeze-edge"><div class="intitule-wrap">${ficheBtnHtml(rec)}${textFieldHtml('Intitule', rec.Intitule)}</div></td>`;
     } else {
      html += `<td class="freeze-col col-heure">${staticHeureHtml(rec, d)}${stickerHtml(rec)}</td>`;
-     html += `<td class="col-intitule freeze-col freeze-edge"><div class="intitule-wrap"><button type="button" class="fiche-btn" title="Voir en fiche">▤</button>${staticFieldHtml(rec.Intitule)}</div></td>`;
+     html += `<td class="col-intitule freeze-col freeze-edge"><div class="intitule-wrap">${ficheBtnHtml(rec)}${staticFieldHtml(rec.Intitule)}</div></td>`;
     }
     if (participationCollapsed){
       html += `<td class="grp-collapsed-cell" data-group="participation" title="Cliquer pour déplier">…</td>`;
@@ -1318,7 +1353,8 @@ function render(){
     // Ligne interstitielle "+" (entre cette ligne et la suivante, ou en bas de liste)
     const nextRec = visibles[idx + 1] || null;
     const sameGroup = !!(nextRec && dateKeys[idx] !== null && dateKeys[idx + 1] === dateKeys[idx]);
-    html += renderAddRow(rec, nextRec, sameGroup, nbColonnes);
+    //html += renderAddRow(rec, nextRec, sameGroup, nbColonnes);
+    if (!showUndated) html += renderAddRow(rec, nextRec, sameGroup, nbColonnes); 
   }
   html += '</tbody></table>';
   pr.tHtml = performance.now();
@@ -1489,6 +1525,84 @@ function ficheUpdateDateHeure(newDatePart, newTimePart){
   const [hh,mm] = (newTimePart || toInputTime(cur)).split(':').map(Number);
   ficheSetField('Date_RDV', Math.floor(new Date(y, (m-1), d, hh, mm, 0, 0).getTime() / 1000));
 }
+// ---------- Verrou d'édition (colonne Verrou) ----------
+let ficheLockedRowId = null; // ligne verrouillée par la fiche actuellement ouverte
+function setVerrou(rowId, value){
+  return grist.docApi.applyUserActions([['UpdateRecord', TABLE_ID, rowId, { Verrou: value }]]);
+}
+
+// ---------- Verrou global du mode édition rapide ----------
+let editLockedIds = new Set(); // lignes verrouillées par CE mode édition rapide
+let editModeBusy = false;      // évite les doubles clics pendant l'écriture
+
+// Lignes concernées par l'édition rapide : non supprimées, sans date ou à venir
+function getEditableRecords(){
+  const today0 = startOfToday();
+  return allRecords.filter(r => {
+    if (r.IsDeleted === true) return false;
+    const d = toDate(r.Date_RDV);
+    return !d || d >= today0;
+  });
+}
+
+function setVerrouBulk(rowIds, value){
+  if (!rowIds.length) return Promise.resolve();
+  return grist.docApi.applyUserActions([
+    ['BulkUpdateRecord', TABLE_ID, rowIds, { Verrou: rowIds.map(() => value) }]
+  ]);
+}
+
+function releaseEditLocks(){
+  if (!editLockedIds.size) return;
+  const ids = [...editLockedIds];
+  editLockedIds = new Set();
+  setVerrouBulk(ids, false).catch(e => {
+    console.error(e);
+    showWriteError(e, 'déverrouiller les lignes');
+  });
+}
+
+// Message d'erreur temporaire dans la barre du haut
+function flashError(msg){
+  setStatut(msg, true);
+  setTimeout(() => { if (document.getElementById('statut').textContent === msg) setStatut(''); }, 4000);
+}
+
+
+// Point d'entrée des clics sur l'icône : vérifie le verrou, le pose, puis ouvre la fiche.
+async function requestOpenFiche(rowId){
+  if (ficheLockedRowId !== null) return; // une ouverture est déjà en cours
+  const rec = allRecords.find(r => r.id === rowId);
+  if (!rec) return;
+  if (editMode && editLockedIds.has(rowId)){ openFiche(rowId); return; }
+  if (rec.Verrou === true){
+    flashError(msg)
+    return;
+  }
+  try{
+    await setVerrou(rowId, true);
+    ficheLockedRowId = rowId;
+  }catch(e){
+    console.error(e);
+    showWriteError(e, 'verrouiller cette ligne');
+    return;
+  }
+  openFiche(rowId);
+}
+
+// Remet Verrou à false pour la ligne que cette fiche avait verrouillée.
+function releaseFicheLock(){
+  if (ficheLockedRowId === null) return;
+  const rowId = ficheLockedRowId;
+  ficheLockedRowId = null;
+  setVerrou(rowId, false).catch(e => {
+    console.error(e);
+    showWriteError(e, 'déverrouiller cette ligne');
+  });
+}
+
+// Filet de sécurité : fermeture de l'onglet / de la page pendant qu'une fiche est ouverte
+window.addEventListener('pagehide', () => { releaseFicheLock(); releaseEditLocks(); });
 
 // keepDraft = true : reconstruit la fiche en conservant les modifications en
 // cours (ex. après ajout/retrait d'une puce, pour recalculer les listes filtrées).
@@ -1514,6 +1628,9 @@ function openFiche(rowId, keepDraft){
   body += fieldRowHtml('Toute la journée', `<input type="checkbox" class="fiche-all-day" ${rec.IsAllDay ? 'checked' : ''}>`, 'fiche-field-centered');
   body += fieldRowHtml('Jour férié', `<input type="checkbox" class="fiche-holiday" ${rec.IsHoliday ? 'checked' : ''}>`, 'fiche-field-centered');
   body += `</div>`;
+  // Bouton visible uniquement si le rendez-vous a une date
+  if (d) body += `<div><button type="button" class="fiche-reprog" title="Supprime la date et l'heure (effectif après « Valider »)">📅 À reprogrammer</button></div>`;
+
   body += fieldRowHtml('Intitulé', `<textarea class="fiche-field-input" data-col="Intitule" rows="2">${escapeHtml(rec.Intitule)}</textarea>`);
 
   // Zone "Participation"
@@ -1730,6 +1847,7 @@ function closeFiche(){
   ficheDraft = null;
   updateFicheDirtyState();
   document.getElementById('fiche-error').textContent = '';
+  releaseFicheLock();
 }
 
 // Fermeture demandée par l'utilisateur (✕, Annuler, clic à côté, Échap) :
@@ -1747,6 +1865,8 @@ async function validateFiche(){
   const changes = Object.assign({}, ficheDraft.fields);
   for (const [colId, ids] of Object.entries(ficheDraft.refs)) changes[colId] = refCellValue(colId, ids);
   if (!Object.keys(changes).length){ closeFiche(); return; }
+
+   if (ficheLockedRowId === rowId) changes.Verrou = false;
 
   const btn = document.querySelector('#fiche-card .fiche-validate');
   btn.disabled = true;
@@ -1809,6 +1929,12 @@ function attachFicheHandlers(rowId){
 
   const holidayEl = overlay.querySelector('.fiche-holiday');
   if (holidayEl) holidayEl.addEventListener('change', e => ficheSetField('IsHoliday', e.target.checked));
+  
+  const reprogEl = overlay.querySelector('.fiche-reprog');
+  if (reprogEl) reprogEl.addEventListener('click', () => {
+    ficheSetField('Date_RDV', null);   // une date vide = rendez-vous à reprogrammer
+    openFiche(rowId, true);            // reconstruit la fiche en gardant le brouillon
+  });
 
   attachReflistHandlers(overlay, rowId);
 }
@@ -2158,7 +2284,7 @@ function attachHandlers(){
     if (delBtn) delBtn.addEventListener('click', () => deleteRow(rowId));
 
     const ficheBtn = tr.querySelector('.fiche-btn');
-    if (ficheBtn) ficheBtn.addEventListener('click', () => openFiche(rowId));
+    if (ficheBtn) ficheBtn.addEventListener('click', () => requestOpenFiche(rowId));
 
     tr.querySelectorAll('.grp-collapsed-cell').forEach(cell => {
       cell.addEventListener('click', () => toggleGroup(cell.dataset.group));
@@ -2323,7 +2449,7 @@ function printTable(){
     <colgroup>
       <col style="width:6%"><col style="width:6%"><col style="width:5%"><col style="width:13%">
       <col style="width:9%"><col style="width:8%"><col style="width:9%"><col style="width:6%">
-      <col style="width:7%"><col style="width:7%"><col style="width:5%"><col style="width:14%"><col style="width:3%">
+      <col style="width:7%"><col style="width:7%"><col style="width:5%"><col style="width:17%">
     </colgroup>
     <thead>
       <tr>
@@ -2368,35 +2494,77 @@ const sem = document.getElementById('switch-editmode');
 const sw  = document.getElementById('switch-passes');
 const semLabel = document.getElementById('switch-label-editmode');
 const swLabel  = document.getElementById('switch-label');
+
 const printBtn = document.getElementById('print-table-btn');
 printBtn.addEventListener('click', printTable);
+
+const undatedBtn = document.getElementById('undated-btn');
+undatedBtn.addEventListener('click', toggleUndated);
 
 function updateSwitchesState(){
   sem.classList.toggle('on', editMode);
   sw.classList.toggle('on', showPast);
-  // Édition rapide indisponible tant que les rendez-vous passés sont affichés, et inversement
+  undatedBtn.classList.toggle('on', showUndated);
+  // Le switch des rendez-vous passés n'a pas d'effet dans la vue « À reprogrammer »
+  const swBloque = editMode || showUndated;
   sem.classList.toggle('disabled', showPast);
   semLabel.classList.toggle('disabled', showPast);
-  sw.classList.toggle('disabled', editMode);
-  swLabel.classList.toggle('disabled', editMode);
-  sem.title = showPast ? 'Désactivez d\'abord l\'affichage des rendez-vous passés' : '';
-  sw.title  = editMode ? 'Désactivez d\'abord le mode édition rapide' : '';
-  printBtn.style.display = showPast ? 'none' : '';
+  sw.classList.toggle('disabled', swBloque);
+  swLabel.classList.toggle('disabled', swBloque);
+  sem.title = showPast ? "Désactivez d'abord l'affichage des rendez-vous passés" : '';
+  sw.title  = editMode ? "Désactivez d'abord le mode édition rapide"
+            : (showUndated ? "Désactivez d'abord la vue « À reprogrammer »" : '');
+  // L'impression ne concerne que les rendez-vous à venir
+  printBtn.style.display = (showPast || showUndated) ? 'none' : '';
 }
 
-function toggleEditMode(){
-  if (showPast) return; // désactivé
-  editMode = !editMode;
-  updateSwitchesState();
-  render();
+async function toggleEditMode(){
+  if (showPast || editModeBusy) return;
+  editModeBusy = true;
+  try{
+    if (!editMode){
+      // Entrée : aucune ligne de la grille ne doit être verrouillée
+      const rows = getEditableRecords();
+      const nbVerrouillees = rows.filter(r => r.Verrou === true).length;
+      if (nbVerrouillees){
+        flashError(`🔒 Édition rapide impossible : ${nbVerrouillees} ligne${nbVerrouillees > 1 ? 's' : ''} en cours de modification.`);
+        return;
+      }
+      const ids = rows.map(r => r.id);
+      try{
+        await setVerrouBulk(ids, true);
+      }catch(e){
+        console.error(e);
+        showWriteError(e, 'verrouiller les lignes');
+        return;
+      }
+      editLockedIds = new Set(ids);
+      editMode = true;
+    } else {
+      // Sortie : on rend les verrous
+      editMode = false;
+      releaseEditLocks();
+    }
+    updateSwitchesState();
+    render();
+  } finally {
+    editModeBusy = false;
+  }
 }
 
 function togglePast(){
-  if (editMode) return; // désactivé
+  if (editMode || showUndated) return; // désactivé
   showPast = !showPast;
   updateSwitchesState();
   render();
-  scrollToToday();
+  if (showPast) scrollToToday();
+}
+
+function toggleUndated(){
+  showUndated = !showUndated;
+  updateSwitchesState();
+  render();
+  document.getElementById('table-wrap').scrollTop = 0;
 }
 
 sem.addEventListener('click', toggleEditMode);
