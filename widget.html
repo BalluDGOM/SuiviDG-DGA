@@ -143,8 +143,6 @@
     border-radius:4px;padding:5px 12px;font:inherit;font-size:13px;cursor:pointer;
   }
   .fiche-reprog:hover{background:var(--rouge-passe);color:#fff;}
-  .fiche-btn-locked{color:var(--rouge-passe);cursor:not-allowed;}
-  .fiche-btn-locked:hover{background:transparent;border-color:transparent;}
 
   /* Pastilles « Nouveau » / « Modifié » sous l'horaire */
   .sticker{
@@ -1069,11 +1067,9 @@ async function addRow(dateObj){
   const ts = dateObj ? Math.floor(dateObj.getTime() / 1000) : null;
   try{
     const fields = { Date_RDV: ts };
-    if (editMode) fields.Verrou = true;
     const res = await grist.docApi.applyUserActions([['AddRecord', TABLE_ID, null, fields]]);
     if (editMode){
       const newId = res && res.retValues && res.retValues[0];
-      if (newId) editLockedIds.add(newId);
     }
     setStatut('Ligne ajoutée ✓', false);
     hideWriteError();
@@ -1123,13 +1119,6 @@ function renderAddRow(recA, recB, sameGroup, nbColonnes){
   </tr>`;
 }
 
-function ficheBtnHtml(rec){
-  // Verrou posé par notre propre mode édition rapide : la fiche reste accessible
-  const lockedByOther = rec.Verrou === true && !(editMode && editLockedIds.has(rec.id));
-  return lockedByOther
-    ? `<button type="button" class="fiche-btn fiche-btn-locked" title="Ligne en cours de modification">🔒</button>`
-    : `<button type="button" class="fiche-btn" title="Voir en fiche">▤</button>`;
-}
 // ---------- Rendu ----------
 function render(){
   const pr = { n: ++perfRenderCount, t0: performance.now() };
@@ -1209,22 +1198,22 @@ function render(){
       <th class="th-creneau-sub freeze-col" colspan="${nbCreneauCols}">Sec préfet</th>
       <th class="th-nature-sub freeze-col freeze-edge">Sec préfet</th>-->`;
 
-  if (participationCollapsed){
+  /*if (participationCollapsed){
     html += `<th class="th-participation-sub">…</th>`;
   } else {
-    html += `<!--<th class="th-participation-sub">Sec préfet</th>
+    html += `<th class="th-participation-sub">Sec préfet</th>
       <th class="th-participation-sub">Cab DG</th>
-      <th class="th-participation-sub">Sec ss-dir</th>-->`;
-  }
+      <th class="th-participation-sub">Sec ss-dir</th>`;
+  }*/
 
-  if (dossierCollapsed){
+ /* if (dossierCollapsed){
     html += `<th class="th-dossier-sub">…</th>`;
   } else {
-    html += `<!-- <th class="th-dossier-sub">Cab DG</th>
+    html += `<th class="th-dossier-sub">Cab DG</th>
       <th class="th-dossier-sub">Sec Cab DG</th>
       <th class="th-dossier-sub">Sec Sous-dir</th>
-      <th class="th-dossier-sub">Cab DG</th>-->`;
-  }
+      <th class="th-dossier-sub">Cab DG</th>`;
+  }*/
 
   html += `</tr>
     <tr>
@@ -1262,7 +1251,7 @@ function render(){
           <span class="ferie-badge">FÉRIÉ</span>
           ${rec.Intitule ? `<span class="ferie-row-intitule">${escapeHtml(rec.Intitule)}</span>` : ''}
           <span class="ferie-row-actions">
-            ${ficheBtnHtml(rec)}
+            <button type="button" class="fiche-btn" title="Voir en fiche">▤</button>
             <button type="button" class="del-btn" title="Supprimer cette ligne">✕</button>
           </span>
         </div>
@@ -1303,10 +1292,10 @@ function render(){
     }
     if (editMode) {
      html += `<td class="freeze-col col-heure">${heureCellHtml(rec, d)}${stickerHtml(rec)}</td>`;
-     html += `<td class="col-intitule freeze-col freeze-edge"><div class="intitule-wrap">${ficheBtnHtml(rec)}${textFieldHtml('Intitule', rec.Intitule)}</div></td>`;
+     html += `<td class="col-intitule freeze-col freeze-edge"><div class="intitule-wrap"><button type="button" class="fiche-btn" title="Voir en fiche">▤</button>${textFieldHtml('Intitule', rec.Intitule)}</div></td>`;
     } else {
      html += `<td class="freeze-col col-heure">${staticHeureHtml(rec, d)}${stickerHtml(rec)}</td>`;
-     html += `<td class="col-intitule freeze-col freeze-edge"><div class="intitule-wrap">${ficheBtnHtml(rec)}${staticFieldHtml(rec.Intitule)}</div></td>`;
+     html += `<td class="col-intitule freeze-col freeze-edge"><div class="intitule-wrap"><button type="button" class="fiche-btn" title="Voir en fiche">▤</button>${staticFieldHtml(rec.Intitule)}</div></td>`;
     }
     if (participationCollapsed){
       html += `<td class="grp-collapsed-cell" data-group="participation" title="Cliquer pour déplier">…</td>`;
@@ -1525,42 +1514,6 @@ function ficheUpdateDateHeure(newDatePart, newTimePart){
   const [hh,mm] = (newTimePart || toInputTime(cur)).split(':').map(Number);
   ficheSetField('Date_RDV', Math.floor(new Date(y, (m-1), d, hh, mm, 0, 0).getTime() / 1000));
 }
-// ---------- Verrou d'édition (colonne Verrou) ----------
-let ficheLockedRowId = null; // ligne verrouillée par la fiche actuellement ouverte
-function setVerrou(rowId, value){
-  return grist.docApi.applyUserActions([['UpdateRecord', TABLE_ID, rowId, { Verrou: value }]]);
-}
-
-// ---------- Verrou global du mode édition rapide ----------
-let editLockedIds = new Set(); // lignes verrouillées par CE mode édition rapide
-let editModeBusy = false;      // évite les doubles clics pendant l'écriture
-
-// Lignes concernées par l'édition rapide : non supprimées, sans date ou à venir
-function getEditableRecords(){
-  const today0 = startOfToday();
-  return allRecords.filter(r => {
-    if (r.IsDeleted === true) return false;
-    const d = toDate(r.Date_RDV);
-    return !d || d >= today0;
-  });
-}
-
-function setVerrouBulk(rowIds, value){
-  if (!rowIds.length) return Promise.resolve();
-  return grist.docApi.applyUserActions([
-    ['BulkUpdateRecord', TABLE_ID, rowIds, { Verrou: rowIds.map(() => value) }]
-  ]);
-}
-
-function releaseEditLocks(){
-  if (!editLockedIds.size) return;
-  const ids = [...editLockedIds];
-  editLockedIds = new Set();
-  setVerrouBulk(ids, false).catch(e => {
-    console.error(e);
-    showWriteError(e, 'déverrouiller les lignes');
-  });
-}
 
 // Message d'erreur temporaire dans la barre du haut
 function flashError(msg){
@@ -1568,41 +1521,6 @@ function flashError(msg){
   setTimeout(() => { if (document.getElementById('statut').textContent === msg) setStatut(''); }, 4000);
 }
 
-
-// Point d'entrée des clics sur l'icône : vérifie le verrou, le pose, puis ouvre la fiche.
-async function requestOpenFiche(rowId){
-  if (ficheLockedRowId !== null) return; // une ouverture est déjà en cours
-  const rec = allRecords.find(r => r.id === rowId);
-  if (!rec) return;
-  if (editMode && editLockedIds.has(rowId)){ openFiche(rowId); return; }
-  if (rec.Verrou === true){
-    flashError(msg)
-    return;
-  }
-  try{
-    await setVerrou(rowId, true);
-    ficheLockedRowId = rowId;
-  }catch(e){
-    console.error(e);
-    showWriteError(e, 'verrouiller cette ligne');
-    return;
-  }
-  openFiche(rowId);
-}
-
-// Remet Verrou à false pour la ligne que cette fiche avait verrouillée.
-function releaseFicheLock(){
-  if (ficheLockedRowId === null) return;
-  const rowId = ficheLockedRowId;
-  ficheLockedRowId = null;
-  setVerrou(rowId, false).catch(e => {
-    console.error(e);
-    showWriteError(e, 'déverrouiller cette ligne');
-  });
-}
-
-// Filet de sécurité : fermeture de l'onglet / de la page pendant qu'une fiche est ouverte
-window.addEventListener('pagehide', () => { releaseFicheLock(); releaseEditLocks(); });
 
 // keepDraft = true : reconstruit la fiche en conservant les modifications en
 // cours (ex. après ajout/retrait d'une puce, pour recalculer les listes filtrées).
@@ -1847,7 +1765,6 @@ function closeFiche(){
   ficheDraft = null;
   updateFicheDirtyState();
   document.getElementById('fiche-error').textContent = '';
-  releaseFicheLock();
 }
 
 // Fermeture demandée par l'utilisateur (✕, Annuler, clic à côté, Échap) :
@@ -1866,7 +1783,6 @@ async function validateFiche(){
   for (const [colId, ids] of Object.entries(ficheDraft.refs)) changes[colId] = refCellValue(colId, ids);
   if (!Object.keys(changes).length){ closeFiche(); return; }
 
-   if (ficheLockedRowId === rowId) changes.Verrou = false;
 
   const btn = document.querySelector('#fiche-card .fiche-validate');
   btn.disabled = true;
@@ -2284,7 +2200,7 @@ function attachHandlers(){
     if (delBtn) delBtn.addEventListener('click', () => deleteRow(rowId));
 
     const ficheBtn = tr.querySelector('.fiche-btn');
-    if (ficheBtn) ficheBtn.addEventListener('click', () => requestOpenFiche(rowId));
+    if (ficheBtn) ficheBtn.addEventListener('click', () => openFiche(rowId));
 
     tr.querySelectorAll('.grp-collapsed-cell').forEach(cell => {
       cell.addEventListener('click', () => toggleGroup(cell.dataset.group));
@@ -2519,38 +2435,10 @@ function updateSwitchesState(){
 }
 
 async function toggleEditMode(){
-  if (showPast || editModeBusy) return;
+  if (showPast ) return;
   editModeBusy = true;
-  try{
-    if (!editMode){
-      // Entrée : aucune ligne de la grille ne doit être verrouillée
-      const rows = getEditableRecords();
-      const nbVerrouillees = rows.filter(r => r.Verrou === true).length;
-      if (nbVerrouillees){
-        flashError(`🔒 Édition rapide impossible : ${nbVerrouillees} ligne${nbVerrouillees > 1 ? 's' : ''} en cours de modification.`);
-        return;
-      }
-      const ids = rows.map(r => r.id);
-      try{
-        await setVerrouBulk(ids, true);
-      }catch(e){
-        console.error(e);
-        showWriteError(e, 'verrouiller les lignes');
-        return;
-      }
-      editLockedIds = new Set(ids);
-      editMode = true;
-    } else {
-      // Sortie : on rend les verrous
-      editMode = false;
-      releaseEditLocks();
-    }
-    updateSwitchesState();
-    render();
-  } finally {
-    editModeBusy = false;
+  editMode = !editMode;
   }
-}
 
 function togglePast(){
   if (editMode || showUndated) return; // désactivé
