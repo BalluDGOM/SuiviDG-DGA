@@ -1072,7 +1072,7 @@ function computeInsertDate(recA, recB){
 async function addRow(dateObj){
   const ts = dateObj ? Math.floor(dateObj.getTime() / 1000) : null;
   try{
-    const fields = { Date_RDV: ts };
+    await grist.docApi.applyUserActions([['AddRecord', TABLE_ID, null, { Date_RDV: ts }]]);
     setStatut('Ligne ajoutée ✓', false);
     hideWriteError();
   }catch(e){
