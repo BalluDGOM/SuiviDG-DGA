@@ -139,7 +139,7 @@
   }
   .fiche-btn:hover{background:#e8e8fb;border-color:#c7c7f5;}
   .fiche-reprog{
-    border:1px solid var(--rouge-passe);background:#fff;color:var(--rouge-passe);
+    border:1px solid var(--rouge-passe);background:#fff;color:var(--rouge-passe);margin-top:12px;
     border-radius:4px;padding:5px 12px;font:inherit;font-size:13px;cursor:pointer;
   }
   .fiche-reprog:hover{background:var(--rouge-passe);color:#fff;}
@@ -217,7 +217,7 @@
   }
   .fiche-row2{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
   .fiche-row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;}
-  .fiche-row4{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px;align-items:start;}
+  .fiche-row4{display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;gap:12px;align-items:start;}
   .fiche-field-centered{align-items:center;}
   .fiche-field-centered label{text-align:center;}
   .fiche-field-centered .fiche-input-wrap{display:flex;justify-content:center;}
@@ -439,7 +439,13 @@
     color:var(--bleu-france);font:inherit;cursor:pointer;
   }
   .add-btn-text:hover{background:var(--bleu-france);color:#fff;}
-  
+  /* Conteneur collant : garde le « + » à la hauteur de la colonne Intitulé figée */
+  .add-btn-anchor{
+    position:sticky;
+    left:var(--intitule-left, 0px);
+    width:0;height:5px;
+    z-index:20;
+  }
 </style>
 </head>
 <body>
@@ -1067,10 +1073,6 @@ async function addRow(dateObj){
   const ts = dateObj ? Math.floor(dateObj.getTime() / 1000) : null;
   try{
     const fields = { Date_RDV: ts };
-    const res = await grist.docApi.applyUserActions([['AddRecord', TABLE_ID, null, fields]]);
-    if (editMode){
-      const newId = res && res.retValues && res.retValues[0];
-    }
     setStatut('Ligne ajoutée ✓', false);
     hideWriteError();
   }catch(e){
@@ -1115,7 +1117,7 @@ function renderAddRow(recA, recB, sameGroup, nbColonnes){
   const btnColspan = nbColonnes - nbCreneauCols;        // de Intitulé jusqu'à Actions
   return `<tr class="add-row" data-after="${afterId}" data-before="${beforeId}">
     <td colspan="${fillerColspan}"></td>
-    <td class="add-row-btn-cell" colspan="${btnColspan}"><button type="button" class="add-btn" title="Ajouter une ligne ici">+</button></td>
+    <td class="add-row-btn-cell" colspan="${btnColspan}"><div class="add-btn-anchor"><button type="button" class="add-btn" title="Ajouter une ligne ici">+</button></div></td>
   </tr>`;
 }
 
@@ -1175,7 +1177,7 @@ function render(){
   const nbDossierCols = dossierCollapsed ? 1 : 4;
   const nbParticipationCols = participationCollapsed ? 1 : 3;
   const nbCreneauCols = isMobileView ? 2 : 3; // pas de colonne "Jour" séparée en vue mobile
-  const nbColonnes = nbCreneauCols + 1 + nbParticipationCols + nbDossierCols + 1 + 1 + 1;
+  const nbColonnes = nbCreneauCols + 1 + nbParticipationCols + nbDossierCols + 1 + 1 ;  // Observations, Actions
 
   const dossierToggleIcon = dossierCollapsed ? '▸' : '◂';
   const participationToggleIcon = participationCollapsed ? '▸' : '◂';
@@ -1190,9 +1192,9 @@ function render(){
       <th class="th-dossier-header" colspan="${nbDossierCols}">Dossier
         <button type="button" class="grp-toggle" data-group="dossier" title="${dossierCollapsed?'Déplier':'Replier'} le bloc Dossier">${dossierToggleIcon}</button>
       </th>
-      <th class="th-other" rowspan="3">Observations</th>
+      <th class="th-other" rowspan="2">Observations</th>
       <!--<th class="th-other" rowspan="3">Reçu</th>-->
-      <th class="th-other" rowspan="3">Actions</th>
+      <th class="th-other" rowspan="2">Actions</th>
     </tr>
     <!-- <tr>
       <th class="th-creneau-sub freeze-col" colspan="${nbCreneauCols}">Sec préfet</th>
@@ -1419,7 +1421,7 @@ updateIsMobileView(); // état initial, avant le tout premier rendu
 function syncStickyLeftOffsets(){
   const table = document.querySelector('#table-wrap table');
   if (!table) return;
-  const row3 = table.querySelectorAll('thead tr')[2];
+  const row3 = table.querySelectorAll('thead tr')[1];
   if (!row3) return;
 
   const thJour = row3.querySelector('.col-jour');   // absent en vue mobile
@@ -1436,6 +1438,7 @@ function syncStickyLeftOffsets(){
   const lDate = lJour + wJour;
   const lHeure = lDate + wDate;
   const lIntitule = lHeure + wHeure;
+  table.style.setProperty('--intitule-left', `${lIntitule}px`); 
 
   // En-têtes fusionnées (lignes 1 et 2) : Créneau démarre à 0, Nature du RDV à lIntitule
   document.querySelectorAll('.th-creneau-header, .th-creneau-sub').forEach(el => { el.style.left = '0px'; });
@@ -1515,11 +1518,6 @@ function ficheUpdateDateHeure(newDatePart, newTimePart){
   ficheSetField('Date_RDV', Math.floor(new Date(y, (m-1), d, hh, mm, 0, 0).getTime() / 1000));
 }
 
-// Message d'erreur temporaire dans la barre du haut
-function flashError(msg){
-  setStatut(msg, true);
-  setTimeout(() => { if (document.getElementById('statut').textContent === msg) setStatut(''); }, 4000);
-}
 
 
 // keepDraft = true : reconstruit la fiche en conservant les modifications en
@@ -1545,9 +1543,10 @@ function openFiche(rowId, keepDraft){
   body += fieldRowHtml('Heure', `<input type="time" class="fiche-heure" value="${d ? toInputTime(d) : ''}">`);
   body += fieldRowHtml('Toute la journée', `<input type="checkbox" class="fiche-all-day" ${rec.IsAllDay ? 'checked' : ''}>`, 'fiche-field-centered');
   body += fieldRowHtml('Jour férié', `<input type="checkbox" class="fiche-holiday" ${rec.IsHoliday ? 'checked' : ''}>`, 'fiche-field-centered');
+  if (d) body += `<div class="fiche-field fiche-field-centered"><button type="button" class="fiche-reprog" title="Supprime la date et l'heure (effectif après « Valider »)">📅 À reprogrammer</button></div>`;
   body += `</div>`;
   // Bouton visible uniquement si le rendez-vous a une date
-  if (d) body += `<div><button type="button" class="fiche-reprog" title="Supprime la date et l'heure (effectif après « Valider »)">📅 À reprogrammer</button></div>`;
+  //if (d) body += `<div><button type="button" class="fiche-reprog" title="Supprime la date et l'heure (effectif après « Valider »)">📅 À reprogrammer</button></div>`;
 
   body += fieldRowHtml('Intitulé', `<textarea class="fiche-field-input" data-col="Intitule" rows="2">${escapeHtml(rec.Intitule)}</textarea>`);
 
@@ -2249,7 +2248,7 @@ function printTable(){
   const recs = getVisibleRecords();
   if (!recs.length){ setStatut('Aucun rendez-vous à imprimer.', true); return; }
 
-  const NB_COLS = 13;
+  const NB_COLS = 12;
   const cell = v => `<td>${escapeHtml(v)}</td>`;
 
   // Colonne de référence → puces colorées (même logique que l'écran :
@@ -2373,7 +2372,7 @@ function printTable(){
         <th class="h-nature">Nature du RDV</th>
         <th class="h-participation" colspan="3">Participation</th>
         <th class="h-dossier" colspan="4">Dossier</th>
-        <th class="h-other" rowspan="3">Observations</th>
+        <th class="h-other" rowspan="2">Observations</th>
         <!--<th class="h-other" rowspan="3">Reçu</th>-->
       </tr>
       <!--<tr>
@@ -2435,10 +2434,11 @@ function updateSwitchesState(){
 }
 
 async function toggleEditMode(){
-  if (showPast ) return;
-  editModeBusy = true;
+  if (showPast) return;
   editMode = !editMode;
-  }
+  updateSwitchesState();
+  render();
+}
 
 function togglePast(){
   if (editMode || showUndated) return; // désactivé
