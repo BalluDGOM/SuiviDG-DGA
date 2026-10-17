@@ -932,12 +932,11 @@ function hoteSelectHtml(cls, value, attrs){
 // ---------- Statut : toggle cyclique ----------
 function statutList(){ return (statutChoices && statutChoices.length) ? statutChoices : STATUT_DEFAUT; }
 
-// ✅ -> 🌓 -> ⏳ -> ✅ ... (jamais de valeur vide)
+// Part de la valeur affichée : vide = 1er choix ⏳puis... 
 function nextStatut(cur){
   const l = statutList();
-  const i = l.indexOf(cur);
-  if (i === -1) return l[0];          // vide ou valeur inconnue -> 1er choix
-  return l[(i + 1) % l.length];
+  const i = l.indexOf(cur || l[0]);
+  return l[((i === -1 ? 0 : i) + 1) % l.length];
 }
 function statutStaticHtml(rec){
   return rec.Statut ? `<div class="statut-static">${escapeHtml(rec.Statut)}</div>` : '';
