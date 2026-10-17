@@ -446,13 +446,31 @@
     width:0;height:5px;
     z-index:20;
   }
-  /* Dossiers (une ligne par sous-direction) */
-  .dos-line{padding:4px 5px;min-height:1.6em;line-height:1.35;}
-  .dos-line + .dos-line{border-top:1px dashed var(--gris-bordure);}
-  .dos-line select, .dos-line input[type=text]{width:100%;height:auto;}
-  .dos-card{border:1px solid var(--gris-bordure);border-radius:6px;padding:10px;display:grid;gap:8px;background:#fafafa;margin-bottom:8px;}
-  .dos-card-head{display:flex;align-items:center;gap:8px;}
-  .dos-card-head .del-btn{margin-left:auto;}
+  /* Colonne Hôte : jamais de retour à la ligne, la colonne s'ajuste au contenu */
+  th.col-hote, td.col-hote{
+    white-space:nowrap;
+    word-break:normal;
+    overflow-wrap:normal;
+    width:1%;               /* largeur minimale = largeur du contenu */
+  }
+  td.col-hote .static-field{
+    white-space:nowrap;
+    word-break:normal;
+    overflow-wrap:normal;
+  }
+  /* Édition rapide : la liste déroulante garde sa largeur naturelle */
+  td.col-hote select{ width:auto; min-width:100%; }
+  /* Statut (✅ 🌓 ⏳) au-dessus de l'heure */
+  .statut-static{ text-align:center; font-size:16px; line-height:1.2; margin-bottom:3px; }
+  .statut-btn{
+    display:block; margin:0 auto 3px; padding:2px 6px;
+    border:1px solid transparent; border-radius:4px; background:transparent;
+    font-size:16px; line-height:1.2; cursor:pointer;
+  }
+  .statut-btn:hover{ background:#e8e8fb; border-color:#c7c7f5; }
+  .statut-btn.empty{ font-size:12px; color:var(--texte-clair); border:1px dashed var(--gris-bordure); }
+  /* La fiche comporte désormais 6 champs sur la première ligne : retour à la ligne automatique */
+  .fiche-row4{ grid-template-columns:repeat(auto-fit,minmax(100px,1fr)); }
 </style>
 </head>
 <body>
@@ -509,11 +527,6 @@ const PERF_LOG = true;
 const PERF_T0 = performance.now();
 let perfFetchCount = 0;
 let perfRenderCount = 0;
-const DOSSIERS_TABLE_ID = 'Dossiers';
-let allDossiers = [];
-let dossiersByRdv = new Map(); // id RDV -> [dossier, ...]
-let dossiersSig = '';
-let dosKeySeq = 0;
 function perfLog(msg){
   if (PERF_LOG) console.log(`[perf +${Math.round(performance.now() - PERF_T0)}ms] ${msg}`);
 }
@@ -554,19 +567,22 @@ let etatChoices = null;    // liste des choix de Etat (si trouvée), sinon null
 // Système générique : chaque entrée décrit une colonne de SuiviDG_DGA qui
 // peut être une Ref/RefList, avec sa configuration détectée automatiquement
 // (table cible, colonne d'affichage "Nom") et son cache de valeurs.
-//const REFLIST_COLUMNS = ['Participation_souhaitee', 'Sous_direction', 'Participants_designes', 'Bureau_competent'];
+const REFLIST_COLUMNS = ['Participation_souhaitee', 'Sous_direction', 'Participants_designes', 'Bureau_competent'];
 // Filtre optionnel : ne proposer, dans la liste déroulante "+ Ajouter…", que
 // les entités dont la colonne indiquée (dans la table cible) vaut true.
 // Les entités déjà liées mais ne passant pas le filtre restent affichées
 // normalement dans les puces (seule la liste de *nouveaux* choix est filtrée).
-//const REFLIST_FILTERS = { Participation_souhaitee: 'estSsDir', Sous_direction: 'estSsDir',};
+const REFLIST_FILTERS = {
+  Participation_souhaitee: 'estSsDir',
+  Sous_direction: 'estSsDir',
+};
 // Colonne de couleur optionnelle : pour ces colonnes, les vignettes ("puces")
 // sont colorées avec la valeur de cette colonne (recherchée par colId exact
 // puis par libellé) dans la table cible.
-// const REFLIST_COLOR_FIELD = {Sous_direction: 'Couleur', Participation_souhaitee: 'Couleur',};
-const REFLIST_COLUMNS = ['Participation_souhaitee', 'Participants_designes'];
-const REFLIST_FILTERS = { Participation_souhaitee: 'estSsDir' };
-const REFLIST_COLOR_FIELD = { Participation_souhaitee: 'Couleur' };
+const REFLIST_COLOR_FIELD = {
+  Sous_direction: 'Couleur',
+  Participation_souhaitee: 'Couleur',
+};
 const refListConfigs = {};
 for (const colId of REFLIST_COLUMNS){
   refListConfigs[colId] = {
@@ -588,6 +604,10 @@ let hasRecuColumn = null;  // true / false / null (inconnu tant que pas de donn�
 let dossierCollapsed = false;
 let participationCollapsed = false;
 let isMobileView = false; // vrai en dessous du seuil défini par MOBILE_BREAKPOINT_QUERY
+let hotes = [];                 // [{id, name}] triés par Ordre
+let hoteNameById = new Map();
+const STATUT_DEFAUT = ['✅','🌓','⏳'];
+let statutChoices = null;
 
 // ---------- Utilitaires de date ----------
 function toDate(v){
@@ -682,18 +702,15 @@ function updateDateHeure(rec, newDatePart, newTimePart){
   const ts = Math.floor(newDate.getTime()/1000);
   updateField(rec.id, 'Date_RDV', ts);
 }
-async function loadDossierChoices(){
-  dossierChoices = await fetchChoicesFor('Dossier_pour');
-  etatChoices = await fetchChoicesFor('Etat', DOSSIERS_TABLE_ID);
-}
+
 // ---------- Récupération des choix (colonnes de type "Liste de choix") ----------
 // Fonction générique : retourne le tableau de choix configuré pour la colonne
 // `colId` de la table SuiviDG_DGA, ou null si la colonne n'existe pas / n'est
 // pas une colonne à choix.
-async function fetchChoicesFor(colId, tableId = TABLE_ID){
+async function fetchChoicesFor(colId){
   try{
     const tables = await cachedFetchTable('_grist_Tables');
-    const idx = tables.tableId.findIndex(t => t === tableId);
+    const idx = tables.tableId.findIndex(t => t === TABLE_ID);
     if (idx === -1) return null;
     const tableRef = tables.id[idx];
 
@@ -714,6 +731,7 @@ async function fetchChoicesFor(colId, tableId = TABLE_ID){
 async function loadDossierChoices(){
   dossierChoices = await fetchChoicesFor('Dossier_pour');
   etatChoices = await fetchChoicesFor('Etat');
+  statutChoices = await fetchChoicesFor('Statut');
 }
 
 // ---------- Colonnes RefList : configuration de la référence multiple ----------
@@ -835,8 +853,8 @@ let entitesChildrenByParent = new Map(); // entityId -> [entityId enfant, ...]
 let entitesParentById = new Map();       // entityId -> entityId parent (ou undefined)
 
 async function loadEntitesHierarchy(){
-  entitesTableId = refListConfigs.Participation_souhaitee.entityTableId;
-
+  entitesTableId = refListConfigs.Participation_souhaitee.entityTableId
+    || refListConfigs.Sous_direction.entityTableId;
   if (!entitesTableId) return;
   try{
     const tables = await cachedFetchTable('_grist_Tables');
@@ -870,183 +888,63 @@ async function loadEntitesHierarchy(){
   }
 }
 
-// ---------- Dossiers (1 par sous-direction pour chaque RDV) ----------
-async function loadDossiers(){
+// ---------- Hôtes (colonne Hote) : liste triée par la colonne Ordre ----------
+async function loadHotes(){
   try{
-    const t = await grist.docApi.fetchTable(DOSSIERS_TABLE_ID);
+    const t = await cachedFetchTable('Hotes');
     const arr = t.id.map((id, i) => ({
-      id, RDV: t.RDV[i] || 0, Sous_Direction: t.Sous_Direction[i] || 0,
-      Bureau: t.Bureau[i] || 0, Etat: t.Etat[i] || '', Observation: t.Observation[i] || '',
+      id,
+      name: String(t.Nom[i] ?? `#${id}`),
+      ordre: (typeof t.Ordre[i] === 'number') ? t.Ordre[i] : Number.MAX_SAFE_INTEGER,
     }));
-    const sig = JSON.stringify(arr);
-    const changed = sig !== dossiersSig;
-    dossiersSig = sig;
-    allDossiers = arr;
-    dossiersByRdv = new Map();
-    for (const d of arr){
-      if (!dossiersByRdv.has(d.RDV)) dossiersByRdv.set(d.RDV, []);
-      dossiersByRdv.get(d.RDV).push(d);
-    }
-    return changed;
+    arr.sort((a, b) => (a.ordre - b.ordre) || a.name.localeCompare(b.name, 'fr'));
+    hotes = arr;
+    hoteNameById = new Map(arr.map(h => [h.id, h.name]));
   }catch(e){
-    console.warn('Impossible de charger la table Dossiers.', e);
-    return false;
+    console.warn('Impossible de charger la table Hotes.', e);
   }
 }
+// Accepte : un nombre (id), "Hotes[1]", un objet {id}/{rowId}, ou le libellé "Nom"
+function hoteId(v){
+  if (v === null || v === undefined || v === '') return 0;
+  if (typeof v === 'number') return v > 0 ? v : 0;
+  if (Array.isArray(v)) return 0;
+  if (typeof v === 'object') return Number(v.id ?? v.rowId) || 0;
+  const s = String(v);
+  const m = /\[(\d+)\]\s*$/.exec(s);          // "Hotes[1]"
+  if (m) return Number(m[1]);
+  if (/^\d+$/.test(s)) return Number(s);
+  const h = hotes.find(x => x.name === s);     // repli : valeur = libellé
+  return h ? h.id : 0;
+}
+function hoteName(id){ const i = hoteId(id); return i ? (hoteNameById.get(i) || `#${i}`) : ''; }
 
-async function updateDossier(did, changes){
-  try{
-    await grist.docApi.applyUserActions([['UpdateRecord', DOSSIERS_TABLE_ID, did, changes]]);
-    setStatut('Enregistré ✓', false);
-    hideWriteError();
-  }catch(e){
-    console.error(e);
-    setStatut("Échec de l'enregistrement", true);
-    showWriteError(e, 'modifier ce dossier');
-  }
-  await loadDossiers();
-  render();
-}
-
-// --- Aides d'affichage (les noms/couleurs viennent de la table Entites déjà chargée)
-const ENT = () => refListConfigs.Participation_souhaitee;
-function entName(id){ return ENT().entityNameById.get(id) || `#${id}`; }
-function entChip(id){
-  if (!id) return '';
-  return `<span class="reflist-chip reflist-chip-static"${chipColorStyle('Participation_souhaitee', id)}>${escapeHtml(entName(id))}</span>`;
-}
-function bureauOptions(sdId, currentId){
-  const ids = new Set(entitesChildrenByParent.get(sdId) || []); // enfants directs de la sous-direction
-  if (currentId) ids.add(currentId);
-  return [...ids].map(id => ({ id, name: entName(id) })).sort((a,b) => a.name.localeCompare(b.name, 'fr'));
-}
-function sdOptions(currentId, excludeIds){
-  const list = ENT().entities.filter(e => !excludeIds.has(e.id));
-  if (currentId && !list.some(e => e.id === currentId)) list.push({ id: currentId, name: entName(currentId) });
-  return list;
-}
-function selectHtml(cls, options, value, attrs, placeholder){
-  const opts = `<option value="">${placeholder || ''}</option>` +
-    options.map(o => `<option value="${o.id}" ${o.id === value ? 'selected' : ''}>${escapeHtml(o.name)}</option>`).join('');
-  return `<select class="${cls}" ${attrs || ''}>${opts}</select>`;
-}
-function etatSelectHtml(cls, value, attrs){
-  if (etatChoices && etatChoices.length){
-    const list = [...etatChoices];
-    if (value && !list.includes(value)) list.push(value);
-    return `<select class="${cls}" ${attrs || ''}><option value=""></option>` +
-      list.map(c => `<option value="${escapeAttr(c)}" ${c === value ? 'selected' : ''}>${escapeHtml(c)}</option>`).join('') + `</select>`;
-  }
-  return `<input type="text" class="${cls}" ${attrs || ''} value="${escapeAttr(value)}">`;
+// attrs : attributs HTML supplémentaires (ex. data-col="Role")
+function hoteSelectHtml(cls, value, attrs){
+  value = hoteId(value);
+  const list = [...hotes];
+  if (value && !hoteNameById.has(value)) list.push({ id: value, name: `#${value}` });
+  return `<select class="${cls}" ${attrs || ''}><option value=""></option>` +
+    list.map(h => `<option value="${h.id}" ${h.id === value ? 'selected' : ''}>${escapeHtml(h.name)}</option>`).join('') +
+    `</select>`;
 }
 
-// kind : 'sd' | 'bureau' | 'etat' — une .dos-line par dossier du RDV
-function dossierLinesHtml(rec, kind){
-  const ds = dossiersByRdv.get(rec.id) || [];
-  return ds.map(d => {
-    let inner;
-    if (!editMode){
-      inner = kind === 'sd' ? entChip(d.Sous_Direction) : kind === 'bureau' ? entChip(d.Bureau) : escapeHtml(d.Etat);
-    } else {
-      const attrs = `data-did="${d.id}"`;
-      if (kind === 'sd'){
-        const others = new Set(ds.filter(x => x.id !== d.id).map(x => x.Sous_Direction));
-        inner = selectHtml('d-sd', sdOptions(d.Sous_Direction, others), d.Sous_Direction, attrs);
-      } else if (kind === 'bureau'){
-        inner = selectHtml('d-bureau', bureauOptions(d.Sous_Direction, d.Bureau), d.Bureau, attrs);
-      } else {
-        inner = etatSelectHtml('d-etat', d.Etat, attrs);
-      }
-    }
-    return `<div class="dos-line">${inner}</div>`;
-  }).join('');
-}
+// ---------- Statut : toggle cyclique ----------
+function statutList(){ return (statutChoices && statutChoices.length) ? statutChoices : STATUT_DEFAUT; }
 
-// Aligne la i-ème ligne de dossier entre les 3 colonnes (lectures groupées, puis écritures)
-function syncDossierLines(){
-  const jobs = [];
-  document.querySelectorAll('#table-wrap tbody tr[data-id]').forEach(tr => {
-    const cols = [...tr.querySelectorAll('td.dos-col')];
-    if (cols.length < 2) return;
-    const n = Math.max(...cols.map(c => c.children.length));
-    for (let i = 0; i < n; i++){
-      const lines = cols.map(c => c.children[i]).filter(Boolean);
-      jobs.push([lines, Math.max(...lines.map(l => l.offsetHeight))]);
-    }
-  });
-  jobs.forEach(([lines, h]) => lines.forEach(l => { l.style.minHeight = h + 'px'; }));
+// ✅ -> 🌓 -> ⏳ -> ✅ ... (jamais de valeur vide)
+function nextStatut(cur){
+  const l = statutList();
+  const i = l.indexOf(cur);
+  if (i === -1) return l[0];          // vide ou valeur inconnue -> 1er choix
+  return l[(i + 1) % l.length];
 }
-
-// ---------- Dossiers dans la fiche (brouillon) ----------
-function ficheInitDossiers(rowId){
-  return (dossiersByRdv.get(rowId) || []).map(d => ({
-    key: 'd' + d.id, id: d.id, Sous_Direction: d.Sous_Direction, Bureau: d.Bureau,
-    Etat: d.Etat, Observation: d.Observation, removed: false,
-    orig: { Bureau: d.Bureau, Etat: d.Etat, Observation: d.Observation },
-  }));
+function statutStaticHtml(rec){
+  return rec.Statut ? `<div class="statut-static">${escapeHtml(rec.Statut)}</div>` : '';
 }
-function dossierDirty(d){
-  if (d.id === null) return !d.removed;
-  return d.removed || d.Bureau !== d.orig.Bureau || d.Etat !== d.orig.Etat || d.Observation !== d.orig.Observation;
-}
-function buildDossierActions(rowId){
-  const actions = [];
-  for (const d of (ficheDraft.dossiers || [])){
-    if (d.id === null){
-      if (!d.removed) actions.push(['AddRecord', DOSSIERS_TABLE_ID, null,
-        { RDV: rowId, Sous_Direction: d.Sous_Direction, Bureau: d.Bureau || 0, Etat: d.Etat, Observation: d.Observation }]);
-    } else if (d.removed){
-      actions.push(['RemoveRecord', DOSSIERS_TABLE_ID, d.id]);
-    } else if (dossierDirty(d)){
-      actions.push(['UpdateRecord', DOSSIERS_TABLE_ID, d.id,
-        { Bureau: d.Bureau || 0, Etat: d.Etat, Observation: d.Observation }]);
-    }
-  }
-  return actions;
-}
-function dossiersFicheHtml(){
-  const list = ficheDraft.dossiers.filter(d => !d.removed);
-  const used = new Set(list.map(d => d.Sous_Direction));
-  const cards = list.map(d => `
-    <div class="dos-card" data-key="${d.key}">
-      <div class="dos-card-head">${entChip(d.Sous_Direction)}
-        ${d.id === null ? '<span class="sticker sticker-new" style="margin:0">Nouveau</span>' : ''}
-        <button type="button" class="del-btn dos-remove" title="Supprimer ce dossier">✕</button>
-      </div>
-      <div class="fiche-row2">
-        ${fieldRowHtml('Bureau compétent', selectHtml('dos-bureau', bureauOptions(d.Sous_Direction, d.Bureau), d.Bureau, ''))}
-        ${fieldRowHtml('Etat', etatSelectHtml('dos-etat', d.Etat, ''))}
-      </div>
-      ${fieldRowHtml('Observation', `<textarea class="dos-obs" rows="2">${escapeHtml(d.Observation)}</textarea>`)}
-    </div>`).join('');
-  const addSel = selectHtml('dos-add reflist-add', ENT().entities.filter(e => !used.has(e.id)), 0, '', '+ Ajouter une sous-direction…');
-  return `<div class="fiche-field"><label>Dossiers (un par sous-direction)</label>
-    ${cards || '<div class="static-field" style="color:var(--texte-clair)">Aucun dossier</div>'}
-    <div>${addSel}</div></div>`;
-}
-function attachDossierFicheHandlers(overlay, rowId){
-  overlay.querySelectorAll('.dos-card').forEach(card => {
-    const d = ficheDraft.dossiers.find(x => x.key === card.dataset.key);
-    if (!d) return;
-    card.querySelector('.dos-bureau').addEventListener('change', e => { d.Bureau = Number(e.target.value) || 0; updateFicheDirtyState(); });
-    const etat = card.querySelector('.dos-etat');
-    ['change','input'].forEach(ev => etat.addEventListener(ev, e => { d.Etat = e.target.value; updateFicheDirtyState(); }));
-    const ta = card.querySelector('.dos-obs');
-    ficheAutoGrow(ta);
-    ta.addEventListener('input', e => { d.Observation = e.target.value; ficheAutoGrow(ta); updateFicheDirtyState(); });
-    card.querySelector('.dos-remove').addEventListener('click', () => {
-      if (d.id === null) ficheDraft.dossiers = ficheDraft.dossiers.filter(x => x !== d);
-      else d.removed = true;
-      openFiche(rowId, true);
-    });
-  });
-  const addSel = overlay.querySelector('.dos-add');
-  if (addSel) addSel.addEventListener('change', e => {
-    const sd = Number(e.target.value);
-    if (!sd) return;
-    ficheDraft.dossiers.push({ key: 'n' + (++dosKeySeq), id: null, Sous_Direction: sd, Bureau: 0, Etat: '', Observation: '', removed: false });
-    openFiche(rowId, true);
-  });
+function statutBtnHtml(cls, value){
+  const v = value || statutList()[0];
+  return `<button type="button" class="statut-btn ${cls}" title="Cliquer pour changer le statut">${escapeHtml(v)}</button>`;
 }
 
 // Renvoie l'ensemble des identifiants d'entités "descendantes" d'une liste
@@ -1116,7 +1014,7 @@ function getParticipantsDesignesAvailable(cfg, rec, currentIds){
 // ---------- Filtre dynamique pour la liste déroulante de Bureau_competent ----------
 // Ne propose que les entités qui sont des enfants DIRECTS (pas tous les
 // descendants) de l'entité (ou des entités) sélectionnée(s) dans Sous_direction.
-/*function getBureauCompetentAvailable(cfg, rec, currentIds){
+function getBureauCompetentAvailable(cfg, rec, currentIds){
   const base = cfg.entities.filter(e => !currentIds.includes(e.id));
   const sousDirIds = getRefIds('Sous_direction', rec);
   if (!sousDirIds.length) return base;
@@ -1125,12 +1023,15 @@ function getParticipantsDesignesAvailable(cfg, rec, currentIds){
     for (const childId of (entitesChildrenByParent.get(parentId) || [])) directChildIds.add(childId);
   }
   return base.filter(e => directChildIds.has(e.id));
-}*/
+}
 
-
+// Association colId -> fonction de filtrage dynamique (au lieu du simple
+// filtre booléen constant de REFLIST_FILTERS).
 const REFLIST_DYNAMIC_AVAILABLE = {
   Participants_designes: getParticipantsDesignesAvailable,
+  Bureau_competent: getBureauCompetentAvailable,
 };
+
 
 // fetchTable, sous la forme la plus courante ["r", tableId, [id, id...]],
 // avec repli défensif sur ["L", id, id...] ou un tableau déjà "nu".
@@ -1363,7 +1264,7 @@ function render(){
   pr.tPrep = performance.now();
 
   const nbDossierCols = dossierCollapsed ? 1 : 4;
-  const nbParticipationCols = participationCollapsed ? 1 : 3;
+  const nbParticipationCols = participationCollapsed ? 1 : 4;
   const nbCreneauCols = isMobileView ? 2 : 3; // pas de colonne "Jour" séparée en vue mobile
   const nbColonnes = nbCreneauCols + 1 + nbParticipationCols + nbDossierCols + 1 + 1 ;  // Observations, Actions
 
@@ -1388,23 +1289,6 @@ function render(){
       <th class="th-creneau-sub freeze-col" colspan="${nbCreneauCols}">Sec préfet</th>
       <th class="th-nature-sub freeze-col freeze-edge">Sec préfet</th>-->`;
 
-  /*if (participationCollapsed){
-    html += `<th class="th-participation-sub">…</th>`;
-  } else {
-    html += `<th class="th-participation-sub">Sec préfet</th>
-      <th class="th-participation-sub">Cab DG</th>
-      <th class="th-participation-sub">Sec ss-dir</th>`;
-  }*/
-
- /* if (dossierCollapsed){
-    html += `<th class="th-dossier-sub">…</th>`;
-  } else {
-    html += `<th class="th-dossier-sub">Cab DG</th>
-      <th class="th-dossier-sub">Sec Cab DG</th>
-      <th class="th-dossier-sub">Sec Sous-dir</th>
-      <th class="th-dossier-sub">Cab DG</th>`;
-  }*/
-
   html += `</tr>
     <tr>
       ${isMobileView ? '' : '<th class="th-creneau-sub freeze-col col-jour">Jour</th>'}<th class="th-creneau-sub freeze-col col-date">Date RDV</th><th class="th-creneau-sub freeze-col col-heure">Heure</th>
@@ -1413,7 +1297,7 @@ function render(){
   if (participationCollapsed){
     html += `<th class="th-participation-sub grp-collapsed-head" data-group="participation" title="Cliquer pour déplier">Participation</th>`;
   } else {
-    html += `<th class="th-participation-sub">Composition de la délégation</th><th class="th-participation-sub">Participation souhaitée (services)</th><th class="th-participation-sub">Participants désignés</th>`;
+    html += `<th class="th-participation-sub col-hote">Hôte</th><th class="th-participation-sub">Composition de la délégation</th><th class="th-participation-sub">Participation souhaitée (services)</th><th class="th-participation-sub">Participants désignés</th>`;
   }
 
   if (dossierCollapsed){
@@ -1481,21 +1365,27 @@ function render(){
       }
     }
     if (editMode) {
-     html += `<td class="freeze-col col-heure">${heureCellHtml(rec, d)}${stickerHtml(rec)}</td>`;
+   //  html += `<td class="freeze-col col-heure">${heureCellHtml(rec, d)}${stickerHtml(rec)}</td>`;
+      html += `<td class="freeze-col col-heure">${statutBtnHtml('f-statut', rec.Statut || '')}${heureCellHtml(rec, d)}${stickerHtml(rec)}</td>`;
+
      html += `<td class="col-intitule freeze-col freeze-edge"><div class="intitule-wrap"><button type="button" class="fiche-btn" title="Voir en fiche">▤</button>${textFieldHtml('Intitule', rec.Intitule)}</div></td>`;
     } else {
-     html += `<td class="freeze-col col-heure">${staticHeureHtml(rec, d)}${stickerHtml(rec)}</td>`;
+    //html += `<td class="freeze-col col-heure">${staticHeureHtml(rec, d)}${stickerHtml(rec)}</td>`;
+     html += `<td class="freeze-col col-heure">${statutStaticHtml(rec)}${staticHeureHtml(rec, d)}${stickerHtml(rec)}</td>`;
+ 
      html += `<td class="col-intitule freeze-col freeze-edge"><div class="intitule-wrap"><button type="button" class="fiche-btn" title="Voir en fiche">▤</button>${staticFieldHtml(rec.Intitule)}</div></td>`;
     }
     if (participationCollapsed){
       html += `<td class="grp-collapsed-cell" data-group="participation" title="Cliquer pour déplier">…</td>`;
     } else {
       if (editMode) {
+        html += `<td class="col-hote">${hoteSelectHtml('f-hote', hoteId(rec.Hote) || 0)}</td>`; 
         html += `<td>${textFieldHtml('Composition_delegation', rec.Composition_delegation)}</td>`;
         html += `<td>${refListConfigs.Participation_souhaitee.isRefList ? refListFieldHtml('Participation_souhaitee', rec) : textFieldHtml('Participation_souhaitee', rec.Participation_souhaitee)}</td>`;
     html += `<td>${refListConfigs.Participants_designes.isRefList ? refListFieldHtml('Participants_designes', rec) : textFieldHtml('Participants_designes', rec.Participants_designes)}<div style="margin-top:4px">${textFieldHtml('Autres_participants', rec.Autres_participants)}</div></td>`;
         
 	  } else {
+        html += `<td class="col-hote">${staticFieldHtml(hoteName(rec.Hote))}</td>`;
         html += `<td>${staticFieldHtml(rec.Composition_delegation)}</td>`;
         html += `<td>${staticRefListHtml('Participation_souhaitee', rec)}</td>`;
         html += `<td>${staticRefListHtml('Participants_designes', rec)} ${rec.Autres_participants ? `<div class="static-field static-autres">${escapeHtml(rec.Autres_participants)}</div>` : ''}</td>`;
@@ -1505,10 +1395,17 @@ function render(){
     if (dossierCollapsed){
       html += `<td class="grp-collapsed-cell" data-group="dossier" title="Cliquer pour déplier">…</td>`;
     } else {
-      html += `<td>${editMode ? dossierPourCell(rec) : staticFieldHtml(rec.Dossier_pour)}</td>`;
-      html += `<td class="dos-col">${dossierLinesHtml(rec, 'sd')}</td>`;
-      html += `<td class="dos-col">${dossierLinesHtml(rec, 'bureau')}</td>`;
-      html += `<td class="dos-col col-etat">${dossierLinesHtml(rec, 'etat')}</td>`;
+      if (editMode) {
+        html += `<td>${dossierPourCell(rec)}</td>`;
+        html += `<td>${refListConfigs.Sous_direction.isRefList ? refListFieldHtml('Sous_direction', rec) : textFieldHtml('Sous_direction', rec.Sous_direction)}</td>`;
+		html += `<td>${refListConfigs.Bureau_competent.isRefList ? refListFieldHtml('Bureau_competent', rec) : textFieldHtml('Bureau_competent', rec.Bureau_competent)}</td>`;
+        html += `<td>${etatCell(rec)}</td>`;
+      } else {
+        html += `<td>${staticFieldHtml(rec.Dossier_pour)}</td>`;
+        html += `<td>${staticRefListHtml('Sous_direction', rec)}</td>`;
+        html += `<td>${staticRefListHtml('Bureau_competent', rec)}</td>`;
+        html += `<td class="col-etat">${staticFieldHtml(rec.Etat)}</td>`;
+      }
     }
     if (editMode) {
       html += `<td class="col-obs">${textFieldHtml('Observation', rec.Observation)}</td>`;
@@ -1536,7 +1433,6 @@ function render(){
   pr.tHandlers = performance.now();
   syncStickyHeaderOffsets();
   syncStickyLeftOffsets();
-  syncDossierLines();
   pr.tEnd = performance.now();
   if (PERF_LOG){
     const ms = (a, b) => Math.round(b - a);
@@ -1583,7 +1479,6 @@ window.addEventListener('resize', () => {
     }
   }, 150);
 });
-window.addEventListener('focus', () => loadDossiers().then(c => { if (c) render(); }));
 
 // ---------- Vue mobile : pas de colonne "Jour" séparée ----------
 // En dessous de ce seuil, le nom du jour est affiché au-dessus de la date
@@ -1659,9 +1554,7 @@ function fieldRowHtml(label, inputHtml, extraClass){
 let ficheDraft = null; // { rowId, fields: {colId: valeur}, refs: {colId: [ids]} }
 
 function ficheHasPendingChanges(){
-  return !!ficheDraft && (Object.keys(ficheDraft.fields).length > 0
-    || Object.keys(ficheDraft.refs).length > 0
-    || (ficheDraft.dossiers || []).some(dossierDirty));
+  return !!ficheDraft && (Object.keys(ficheDraft.fields).length > 0 || Object.keys(ficheDraft.refs).length > 0);
 }
 function updateFicheDirtyState(){
   document.getElementById('fiche-dirty').textContent = ficheHasPendingChanges() ? '● Modifications non validées' : '';
@@ -1711,8 +1604,7 @@ function openFiche(rowId, keepDraft){
   const saved = allRecords.find(r => r.id === rowId);
   if (!saved) return;
   if (!keepDraft || !ficheDraft || ficheDraft.rowId !== rowId){
-    //ficheDraft = { rowId, fields: {}, refs: {} };
-    ficheDraft = { rowId, fields: {}, refs: {}, dossiers: ficheInitDossiers(rowId) };
+    ficheDraft = { rowId, fields: {}, refs: {} };
     document.getElementById('fiche-error').textContent = '';
   }
   const prevScroll = document.getElementById('fiche-overlay').scrollTop;
@@ -1725,6 +1617,7 @@ function openFiche(rowId, keepDraft){
   // Zone 1 (sans titre) : Date RDV, Heure, Toute la journée, Jour férié sur
   // une même ligne, puis Intitulé.
   body += `<div class="fiche-row4">`;
+  body += fieldRowHtml('Statut', statutBtnHtml('fiche-statut', rec.Statut || ''), 'fiche-field-centered');
   body += fieldRowHtml('Date RDV', `<input type="date" class="fiche-date" value="${d ? toInputDate(d) : ''}">`);
   body += fieldRowHtml('Heure', `<input type="time" class="fiche-heure" value="${d ? toInputTime(d) : ''}">`);
   body += fieldRowHtml('Toute la journée', `<input type="checkbox" class="fiche-all-day" ${rec.IsAllDay ? 'checked' : ''}>`, 'fiche-field-centered');
@@ -1738,8 +1631,11 @@ function openFiche(rowId, keepDraft){
 
   // Zone "Participation"
   body += `<div class="fiche-section section section-participation"><div class="fiche-section-title">Participation</div>`;
-  body += `<div class="fiche-row3">`;
+  body += `<div class="fiche-row2">`;
+  body += fieldRowHtml('Hôte', hoteSelectHtml('fiche-field-input', hoteId(rec.Hote), 'data-col="Hote" data-type="ref"'));
   body += fieldRowHtml('Composition de la délégation', `<textarea class="fiche-field-input" data-col="Composition_delegation" rows="2">${escapeHtml(rec.Composition_delegation)}</textarea>`);
+  body += `</div>`;
+  body += `<div class="fiche-row2">`;
   body += fieldRowHtml('Participation souhaitée (services)', refListConfigs.Participation_souhaitee.isRefList ? refListFieldHtml('Participation_souhaitee', rec) : `<textarea class="fiche-field-input" data-col="Participation_souhaitee" rows="2">${escapeHtml(rec.Participation_souhaitee)}</textarea>`);
   body += fieldRowHtml('Participants désignés', refListConfigs.Participants_designes.isRefList ? refListFieldHtml('Participants_designes', rec) : `<textarea class="fiche-field-input" data-col="Participants_designes" rows="2">${escapeHtml(rec.Participants_designes)}</textarea>`);
   body += `</div>`;
@@ -1750,8 +1646,20 @@ function openFiche(rowId, keepDraft){
 
   // Zone "Dossier" (Dossier pour, Sous-dir, Bureau compétent, Etat, Reçu)
   body += `<div class="fiche-section section-dossier"><div class="fiche-section-title">Dossier</div>`;
+  body += `<div class="fiche-row2">`;
   body += fieldRowHtml('Dossier pour', dossierPourFicheHtml(rec));
-  body += dossiersFicheHtml();
+  body += fieldRowHtml('Sous-dir', refListConfigs.Sous_direction.isRefList ? refListFieldHtml('Sous_direction', rec) : `<textarea class="fiche-field-input" data-col="Sous_direction" rows="1">${escapeHtml(rec.Sous_direction)}</textarea>`);
+  body += `</div>`;
+  body += `<div class="fiche-row2">`;
+  body += fieldRowHtml('Bureau compétent', refListConfigs.Bureau_competent.isRefList ? refListFieldHtml('Bureau_competent', rec) : `<textarea class="fiche-field-input" data-col="Bureau_competent" rows="1">${escapeHtml(rec.Bureau_competent)}</textarea>`);
+  body += fieldRowHtml('Etat', etatFicheHtml(rec));
+  body += `</div>`;
+  /*body += fieldRowHtml('Reçu', hasRecuColumn === false
+    ? `<input type="checkbox" disabled>`
+    : `<input type="checkbox" class="fiche-recu" ${rec.Recu ? 'checked' : ''}>`);*/
+  body += `</div>`;
+  body += `<div class="fiche-section section-autre">`;
+  body += fieldRowHtml('Observations', `<textarea class="fiche-field-input" data-col="Observation" rows="3">${escapeHtml(rec.Observation)}</textarea>`);
   body += `</div>`;
   
   const overlay = document.getElementById('fiche-overlay');
@@ -1954,24 +1862,21 @@ async function validateFiche(){
   const rowId = ficheDraft.rowId;
   const changes = Object.assign({}, ficheDraft.fields);
   for (const [colId, ids] of Object.entries(ficheDraft.refs)) changes[colId] = refCellValue(colId, ids);
+  if (!Object.keys(changes).length){ closeFiche(); return; }
 
-  const actions = [];
-  if (Object.keys(changes).length) actions.push(['UpdateRecord', TABLE_ID, rowId, changes]);
-  actions.push(...buildDossierActions(rowId));
-  if (!actions.length){ closeFiche(); return; }
 
   const btn = document.querySelector('#fiche-card .fiche-validate');
   btn.disabled = true;
   try{
-    await grist.docApi.applyUserActions(actions); // une seule action atomique
+    await grist.docApi.applyUserActions([['UpdateRecord', TABLE_ID, rowId, changes]]);
     setStatut('Enregistré ✓', false);
     hideWriteError();
     closeFiche();
-    await loadDossiers();
-    render();
   }catch(e){
     console.error(e);
     setStatut("Échec de l'enregistrement", true);
+    // La fiche recouvre le bandeau d'erreur : on affiche l'erreur dans la fiche,
+    // et on garde le brouillon pour que l'utilisateur puisse réessayer.
     document.getElementById('fiche-error').textContent = writeErrorText(e, 'modifier cette ligne');
   }finally{
     btn.disabled = false;
@@ -2001,7 +1906,10 @@ function attachFicheHandlers(rowId){
 
   // Aucun envoi à Grist ici : on ne fait que mémoriser dans le brouillon.
   overlay.querySelectorAll('.fiche-field-input').forEach(inp => {
-    const memo = e => ficheSetField(e.target.dataset.col, e.target.value);
+    const memo = e => {
+      const v = e.target.dataset.type === 'ref' ? (Number(e.target.value) || 0) : e.target.value;
+      ficheSetField(e.target.dataset.col, v);
+    };
     inp.addEventListener('input', memo);
     inp.addEventListener('change', memo);
   });
@@ -2027,7 +1935,14 @@ function attachFicheHandlers(rowId){
     ficheSetField('Date_RDV', null);   // une date vide = rendez-vous à reprogrammer
     openFiche(rowId, true);            // reconstruit la fiche en gardant le brouillon
   });
-  attachDossierFicheHandlers(overlay, rowId);
+  const statutEl = overlay.querySelector('.fiche-statut');
+  if (statutEl) statutEl.addEventListener('click', () => {
+    const saved = allRecords.find(r => r.id === rowId);
+    const cur = ficheDraft.fields.Statut !== undefined ? ficheDraft.fields.Statut : ((saved && saved.Statut) || '');
+    const nv = nextStatut(cur);
+    ficheSetField('Statut', nv);          // brouillon, enregistré au clic sur « Valider »
+    statutEl.textContent = nv ;
+  });
   attachReflistHandlers(overlay, rowId);
 }
 
@@ -2360,7 +2275,9 @@ function attachHandlers(){
       inp.addEventListener('input', () => autoGrow(inp));
       inp.addEventListener('change', e => updateField(rowId, e.target.dataset.col, e.target.value));
     });
-    
+    const fHote = tr.querySelector('.f-hote');
+    if (fHote) fHote.addEventListener('change', e => updateField(rowId, 'Hote', Number(e.target.value) || 0));
+
     const sel = tr.querySelector('.f-dossier');
     if (sel) sel.addEventListener('change', e => updateField(rowId, 'Dossier_pour', e.target.value));
     
@@ -2378,16 +2295,14 @@ function attachHandlers(){
     const ficheBtn = tr.querySelector('.fiche-btn');
     if (ficheBtn) ficheBtn.addEventListener('click', () => openFiche(rowId));
 
+    const fStatut = tr.querySelector('.f-statut');
+    if (fStatut) fStatut.addEventListener('click', () =>
+      updateField(rowId, 'Statut', nextStatut(rec.Statut || '')));
+
     tr.querySelectorAll('.grp-collapsed-cell').forEach(cell => {
       cell.addEventListener('click', () => toggleGroup(cell.dataset.group));
     });
-    tr.querySelectorAll('.d-sd').forEach(s => s.addEventListener('change', e =>
-      updateDossier(Number(s.dataset.did), { Sous_Direction: Number(e.target.value) || 0, Bureau: 0 })));
-    tr.querySelectorAll('.d-bureau').forEach(s => s.addEventListener('change', e =>
-      updateDossier(Number(s.dataset.did), { Bureau: Number(e.target.value) || 0 })));
-    tr.querySelectorAll('.d-etat').forEach(s => s.addEventListener('change', e =>
-      updateDossier(Number(s.dataset.did), { Etat: e.target.value })));
-      });
+  });
 
   document.querySelectorAll('.grp-toggle').forEach(btn => {
     btn.addEventListener('click', e => {
@@ -2428,12 +2343,10 @@ function getVisibleRecords(){
     });
 }
 function printTable(){
-  const chipP = id => id ? `<span class="chip"${chipColorStyle('Participation_souhaitee', id)}>${escapeHtml(entName(id))}</span>` : '';
-  const dosCol = (rec, f) => (dossiersByRdv.get(rec.id) || []).map(d => `<div>${f(d)}</div>`).join('');
   const recs = getVisibleRecords();
   if (!recs.length){ setStatut('Aucun rendez-vous à imprimer.', true); return; }
 
-  const NB_COLS = 12;
+  const NB_COLS = 13;
   const cell = v => `<td>${escapeHtml(v)}</td>`;
 
   // Colonne de référence → puces colorées (même logique que l'écran :
@@ -2484,13 +2397,14 @@ function printTable(){
     }
     rows += `<td class="center">${rec.IsAllDay ? 'Toute la journée' : (d ? fmtHeure(d) : '')}</td>`;
     rows += cell(rec.Intitule);
+    rows += cell(hoteName(rec.Hote));
     rows += cell(rec.Composition_delegation);
     rows += `<td>${refChips('Participation_souhaitee', rec)}</td>`;
     rows += `<td>${refChips('Participants_designes', rec)}${autres}</td>`;
     rows += cell(rec.Dossier_pour);
-    rows += `<td>${dosCol(rec, d => chipP(d.Sous_Direction))}</td>`;
-    rows += `<td>${dosCol(rec, d => chipP(d.Bureau))}</td>`;
-    rows += `<td>${dosCol(rec, d => escapeHtml(d.Etat))}</td>`;
+    rows += `<td>${refChips('Sous_direction', rec)}</td>`;
+    rows += `<td>${refChips('Bureau_competent', rec)}</td>`;
+    rows += cell(rec.Etat);
     rows += cell(rec.Observation);
     //rows += `<td class="center recu">${hasRecuColumn !== false && rec.Recu ? '✓' : ''}</td>`;
     rows += '</tr>';
@@ -2515,6 +2429,7 @@ function printTable(){
   td.center{ text-align:center; }
   td.jour{ font-weight:700; }
   td.merged{ background:#f6f6f6; vertical-align:middle; }
+  td.hote{ white-space:nowrap; }
   td.recu{ color:#18753c; font-weight:700; }
   tr.ferie td{ background:#fff; }
   .ferie-badge{ color:#d32f2f; font-weight:700; }
@@ -2547,15 +2462,15 @@ function printTable(){
   <h1>Suivi DG / DGA — rendez-vous à partir du ${escapeHtml(fmtDate(startOfToday()))}</h1>
   <table>
     <colgroup>
-      <col style="width:6%"><col style="width:6%"><col style="width:5%"><col style="width:13%">
-      <col style="width:9%"><col style="width:8%"><col style="width:9%"><col style="width:6%">
-      <col style="width:7%"><col style="width:7%"><col style="width:5%"><col style="width:17%">
+      <col style="width:6%"><col style="width:6%"><col style="width:5%"><col style="width:12%">
+      <col style="width:6%"><col style="width:8%"><col style="width:8%"><col style="width:9%">
+      <col style="width:6%"><col style="width:7%"><col style="width:7%"><col style="width:5%"><col style="width:15%">
     </colgroup>
     <thead>
       <tr>
         <th class="h-creneau" colspan="3">Créneau</th>
         <th class="h-nature">Nature du RDV</th>
-        <th class="h-participation" colspan="3">Participation</th>
+        <th class="h-participation" colspan="4">Participation</th>
         <th class="h-dossier" colspan="4">Dossier</th>
         <th class="h-other" rowspan="2">Observations</th>
         <!--<th class="h-other" rowspan="3">Reçu</th>-->
@@ -2569,6 +2484,7 @@ function printTable(){
       <tr>
         <th class="s-creneau">Jour</th><th class="s-creneau">Date RDV</th><th class="s-creneau">Heure</th>
         <th class="s-nature">Intitulé</th>
+        <th class="s-participation">Hôte</th>
         <th class="s-participation">Composition de la délégation</th><th class="s-participation">Participation souhaitée (services)</th><th class="s-participation">Participants désignés</th>
         <th class="s-dossier">Dossier pour</th><th class="s-dossier">Sous-dir</th><th class="s-dossier">Bureau compétent</th><th class="s-dossier">Etat</th>
       </tr>
@@ -2733,15 +2649,16 @@ grist.onRecords(records => {
   } else {
     refreshAllRefListRawRefs().then(() => { render(); refreshOpenFicheIfAny(); });
   }
-  loadDossiers().then(changed => { if (changed) render(); });
 }, { expandRefs: false }); // identifiants de lignes plutôt que libellés pour les références
 
 perfLog('initialisation : chargement des configurations…');
 Promise.all([
   perfTimed('loadDossierChoices', () => loadDossierChoices()),
+  perfTimed('loadHotes', () => loadHotes()),
   perfTimed('loadRefListConfig(Participation_souhaitee)', () => loadRefListConfig('Participation_souhaitee')),
+  perfTimed('loadRefListConfig(Sous_direction)', () => loadRefListConfig('Sous_direction')),
   perfTimed('loadRefListConfig(Participants_designes)', () => loadRefListConfig('Participants_designes')),
-  perfTimed('loadDossiers', () => loadDossiers()),
+  perfTimed('loadRefListConfig(Bureau_competent)', () => loadRefListConfig('Bureau_competent')),
 ])
   .then(() => perfLog('configurations chargées'))
   .then(() => perfTimed('loadEntitesHierarchy', () => loadEntitesHierarchy()))
