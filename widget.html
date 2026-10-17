@@ -471,6 +471,19 @@
   .statut-btn.empty{ font-size:12px; color:var(--texte-clair); border:1px dashed var(--gris-bordure); }
   /* La fiche comporte désormais 6 champs sur la première ligne : retour à la ligne automatique */
   .fiche-row4{ grid-template-columns:repeat(auto-fit,minmax(100px,1fr)); }
+  /* Recherche */
+  #search-input{
+    border:1px solid var(--gris-bordure);border-radius:4px;
+    padding:5px 10px;font:inherit;font-size:13px;
+    width:300px;max-width:100%;background:#fff;
+  }
+  #search-input:focus{
+    outline:none;border-color:var(--bleu-france);
+    box-shadow:0 0 0 2px rgba(0,0,145,.12);
+  }
+  /* Pendant une recherche, le "+" d'insertion est masqué (les lignes restent
+    dans le DOM pour ne pas casser les rowspan Jour / Date RDV) */
+  body.searching .add-btn{display:none;}
 </style>
 </head>
 <body>
@@ -481,13 +494,14 @@
   </div>
   <div id="topbar">
     <div class="titre">Suivi DG / DGA</div>
+    <input type="search" id="search-input" placeholder="🔍 Rechercher (date, intitulé, observations)…" autocomplete="off">
     <div class="switch-wrap">
-      <span class="switch-label" id="switch-label-editmode">Passer en mode édition rapide</span>
+      <span class="switch-label" id="switch-label-editmode">Édition rapide</span>
       <div class="switch" id="switch-editmode"><div class="knob"></div></div>
     </div>
     <span id="count-masques"></span>
     <div class="switch-wrap">
-      <span class="switch-label" id="switch-label">Afficher les rendez-vous passés</span>
+      <span class="switch-label" id="switch-label">RDV passés</span>
       <div class="switch" id="switch-passes"><div class="knob"></div></div>
     </div>
     <button type="button" id="undated-btn" class="topbar-print" title="Afficher uniquement les rendez-vous sans date">📅 À reprogrammer</button>
@@ -608,6 +622,7 @@ let hotes = [];                 // [{id, name}] triés par Ordre
 let hoteNameById = new Map();
 const STATUT_DEFAUT = ['✅','🌓','⏳'];
 let statutChoices = null;
+let searchQuery = ''; // texte recherché, déjà normalisé (minuscules, sans accents)
 
 // ---------- Utilitaires de date ----------
 function toDate(v){
@@ -630,6 +645,21 @@ function fmtHeure(d){ return `${pad(d.getHours())}:${pad(d.getMinutes())}`; }
 function toInputDate(d){ return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; }
 function toInputTime(d){ return `${pad(d.getHours())}:${pad(d.getMinutes())}`; }
 function startOfToday(){ const d = new Date(); d.setHours(0,0,0,0); return d; }
+
+// ---------- Recherche (Date RDV, Intitulé, Observations) ----------
+function normSearch(s){
+  return String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+}
+function recMatchesSearch(rec, q){
+  if (!q) return true;
+  const d = toDate(rec.Date_RDV);
+  const hay = normSearch([
+    d ? `${fmtJour(d)} ${fmtDate(d)} ${fmtDateLongue(d)}` : '',
+    rec.Intitule,
+    rec.Observation,
+  ].join(' \n '));
+  return q.split(/\s+/).filter(Boolean).every(t => hay.includes(t));
+}
 
 function updateUndatedBtn(activeRecords){
   const btn = document.getElementById('undated-btn');
@@ -1240,9 +1270,13 @@ function render(){
       });
 
   const masques = showUndated ? 0 : activeRecords.length - visibles.length;
+  
+  if (searchQuery) visibles = visibles.filter(r => recMatchesSearch(r, searchQuery));
 
   if (!visibles.length){
-    wrap.innerHTML = showUndated
+    wrap.innerHTML = searchQuery
+  ? `<div id="empty">Aucun résultat pour cette recherche.</div>`
+  : showUndated
     ? `<div id="empty">Aucun rendez-vous à reprogrammer.</div>`
     : `<div id="empty">Aucun rendez-vous à afficher (les rendez-vous passés sont masqués).<br>
         <button type="button" id="add-first-btn" class="add-btn-text">+ Ajouter une ligne</button></div>`;
@@ -2333,6 +2367,7 @@ function getVisibleRecords(){
   const today0 = startOfToday();
   return allRecords
     .filter(r => r.IsDeleted !== true)
+    .filter(r => recMatchesSearch(r, searchQuery))
     .filter(r => { const d = toDate(r.Date_RDV); return !d || showPast || d >= today0; })
     .sort((a,b) => {
       const da = a.Date_RDV, db = b.Date_RDV;
@@ -2515,6 +2550,24 @@ printBtn.addEventListener('click', printTable);
 
 const undatedBtn = document.getElementById('undated-btn');
 undatedBtn.addEventListener('click', toggleUndated);
+const searchInput = document.getElementById('search-input');
+let searchTimer;
+function applySearch(){
+  searchQuery = normSearch(searchInput.value).trim();
+  document.body.classList.toggle('searching', !!searchQuery);
+  render();
+  document.getElementById('table-wrap').scrollTop = 0;
+}
+searchInput.addEventListener('input', () => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(applySearch, 200); // évite de reconstruire le tableau à chaque frappe
+});
+searchInput.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && searchInput.value){
+    searchInput.value = '';
+    applySearch();
+  }
+});
 
 function updateSwitchesState(){
   sem.classList.toggle('on', editMode);
