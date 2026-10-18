@@ -502,6 +502,12 @@
     resize:none;overflow:hidden;min-height:1.8em;
     white-space:pre-wrap;word-break:break-word;font-family:inherit;
   }
+  #my-ssdir-select{
+    border:1px solid var(--gris-bordure);border-radius:4px;
+    padding:4px 6px;font:inherit;font-size:12px;max-width:200px;background:#fff;
+  }
+  /* "+" d'insertion masqué pendant une recherche ou un filtre */
+  body.filtering .add-btn{display:none;}
 </style>
 </head>
 <body>
@@ -512,6 +518,11 @@
   </div>
   <div id="topbar">
     <div class="titre">Suivi DG / DGA</div>
+    <div class="switch-wrap">
+      <span class="switch-label" id="switch-label-mine">Ma sous-direction</span>
+      <div class="switch" id="switch-mine"><div class="knob"></div></div>
+      <select id="my-ssdir-select" style="display:none" title="Sous-direction"></select>
+    </div>
     <input type="search" id="search-input" placeholder="🔍 Rechercher (date, intitulé, observations)…" autocomplete="off">
     <div class="switch-wrap">
       <span class="switch-label" id="switch-label-editmode">Édition rapide</span>
@@ -643,6 +654,8 @@ let hoteNameById = new Map();
 const STATUT_DEFAUT = ['✅','🌓','⏳'];
 let statutChoices = null;
 let searchQuery = ''; // texte recherché, déjà normalisé (minuscules, sans accents)
+let myFilter = false;
+let mySsDirIds = new Set(); // ids des entités "sous-direction" de l'utilisateur
 
 // ---------- Utilitaires de date ----------
 function toDate(v){
@@ -806,6 +819,63 @@ async function fetchChoicesFor(colId, tableId = TABLE_ID){
 async function loadDossierChoices(){
   dossierChoices = await fetchChoicesFor('Dossier_pour');
   etatChoices = await fetchChoicesFor('Etat', DOSSIERS_TABLE_ID);
+}
+// ---------- Filtre « Ma sous-direction » ----------
+function ssDirValueToIds(v){
+  // NomSsDir peut être une référence (id) ou un texte (nom)
+  if (typeof v === 'number') return v > 0 ? [v] : [];
+  if (Array.isArray(v)) return v.filter(x => typeof x === 'number');
+  if (typeof v === 'string' && v){
+    const names = ENT().entityNameById;
+    for (const [id, name] of names) if (name.trim().toLowerCase() === v.trim().toLowerCase()) return [id];
+  }
+  return [];
+}
+async function detectMySsDir(){
+  try{
+    // Table des utilisateurs : celle déjà détectée pour Participants_designes,
+    // sinon "Utilisateurs" par défaut
+    const tableId = refListConfigs.Participants_designes.entityTableId || 'Utilisateurs';
+    const t = await grist.docApi.fetchTable(tableId);
+    if (!t.Moi || !t.NomSsDir){
+      console.warn(`Colonnes "Moi" ou "NomSsDir" introuvables dans ${tableId}.`);
+      return;
+    }
+    // La colonne "Moi" est une formule : vrai uniquement sur la ligne de l'utilisateur connecté
+    const i = t.Moi.findIndex(v => v === true);
+    if (i === -1){
+      console.warn('Aucune ligne avec Moi = true : utilisateur connecté non trouvé.');
+      return;
+    }
+    const ids = ssDirValueToIds(t.NomSsDir[i]);
+    if (ids.length){
+      mySsDirIds = new Set(ids);
+    } else {
+      console.warn('NomSsDir vide ou non reconnue pour cet utilisateur :', t.NomSsDir[i]);
+    }
+  }catch(e){
+    console.warn('Détection de la sous-direction impossible.', e);
+  }
+}
+
+function fillMySsDirSelect(){
+  const sel = document.getElementById('my-ssdir-select');
+  const cur = [...mySsDirIds][0] || 0;
+  sel.innerHTML = //`<option value="">— Ma sous-direction —</option>` +
+    ENT().entities.map(e => `<option value="${e.id}" ${e.id === cur ? 'selected' : ''}>${escapeHtml(e.name)}</option>`).join('');
+  sel.style.display = myFilter ? '' : 'none';
+}
+
+function recMatchesMySsDir(rec){
+  if (!myFilter) return true;
+  if (!mySsDirIds.size) return true; // pas encore choisie : on ne masque rien
+  const part = refListConfigs.Participation_souhaitee.rawRefs.get(rec.id) || [];
+  if (part.some(id => mySsDirIds.has(id))) return true;
+  return (dossiersByRdv.get(rec.id) || []).some(d => mySsDirIds.has(d.Sous_Direction));
+}
+
+function updateFilteringClass(){
+  document.body.classList.toggle('filtering', !!searchQuery || (myFilter && mySsDirIds.size > 0));
 }
 
 // ---------- Colonnes RefList : configuration de la référence multiple ----------
@@ -1486,10 +1556,10 @@ function render(){
   const masques = showUndated ? 0 : activeRecords.length - visibles.length;
   
   if (searchQuery) visibles = visibles.filter(r => recMatchesSearch(r, searchQuery));
-
+  if (myFilter) visibles = visibles.filter(recMatchesMySsDir);
   if (!visibles.length){
-    wrap.innerHTML = searchQuery
-  ? `<div id="empty">Aucun résultat pour cette recherche.</div>`
+    wrap.innerHTML = (searchQuery || myFilter)
+  ? `<div id="empty">Aucun résultat pour cette recherche avec ce filtre.</div>`
   : showUndated
     ? `<div id="empty">Aucun rendez-vous à reprogrammer.</div>`
     : `<div id="empty">Aucun rendez-vous à afficher (les rendez-vous passés sont masqués).<br>
@@ -2583,6 +2653,7 @@ function getVisibleRecords(){
   const today0 = startOfToday();
   return allRecords
     .filter(r => r.IsDeleted !== true)
+    .filter(recMatchesMySsDir)
     .filter(r => recMatchesSearch(r, searchQuery))
     .filter(r => { const d = toDate(r.Date_RDV); return !d || showPast || d >= today0; })
     .sort((a,b) => {
@@ -2774,7 +2845,7 @@ const searchInput = document.getElementById('search-input');
 let searchTimer;
 function applySearch(){
   searchQuery = normSearch(searchInput.value).trim();
-  document.body.classList.toggle('searching', !!searchQuery);
+  updateFilteringClass();
   render();
   document.getElementById('table-wrap').scrollTop = 0;
 }
@@ -2787,6 +2858,27 @@ searchInput.addEventListener('keydown', e => {
     searchInput.value = '';
     applySearch();
   }
+});
+
+//écouteur recherche
+const swMine = document.getElementById('switch-mine');
+const mineSelect = document.getElementById('my-ssdir-select');
+function toggleMine(){
+  myFilter = !myFilter;
+  swMine.classList.toggle('on', myFilter);
+  fillMySsDirSelect();
+  updateFilteringClass();
+  render();
+  document.getElementById('table-wrap').scrollTop = 0;
+}
+swMine.addEventListener('click', toggleMine);
+document.getElementById('switch-label-mine').addEventListener('click', toggleMine);
+mineSelect.addEventListener('change', e => {
+  const id = Number(e.target.value);
+  mySsDirIds = id ? new Set([id]) : new Set();
+  try{ localStorage.setItem('suiviDG_mySsDir', JSON.stringify([...mySsDirIds])); }catch(err){}
+  updateFilteringClass();
+  render();
 });
 
 function updateSwitchesState(){
@@ -2943,7 +3035,9 @@ Promise.all([
     perfLog(rawRefsFromRecordsOk ? 'vérification des identifiants bruts : OK' : `⚠ libellés détectés dans : ${badCols.join(', ')} → repli sur lecture de la table`);
     return rawRefsFromRecordsOk ? null : refreshAllRefListRawRefs();
   })
-  .then(() => { fetchCache.clear(); perfLog(`initialisation terminée (${perfFetchCount} lectures de tables au total) → render final`); if (allRecords.length) render(); });
+  .then(() => { fetchCache.clear(); perfLog(`initialisation terminée (${perfFetchCount} lectures de tables au total) → render final`); if (allRecords.length) render(); })
+  .then(() => detectMySsDir())
+  .then(() => { fillMySsDirSelect(); updateFilteringClass(); if (myFilter) render(); });;
 </script>
 </body>
 </html>
