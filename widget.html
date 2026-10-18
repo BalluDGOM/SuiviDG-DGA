@@ -508,6 +508,32 @@
   }
   /* "+" d'insertion masqué pendant une recherche ou un filtre */
   body.filtering .add-btn{display:none;}
+  #bottombar{
+    position:fixed;left:0;right:0;bottom:0;
+    z-index:60;
+    box-shadow:0 -2px 6px rgba(0,0,0,.12);
+    transform:translateY(100%);
+    visibility:hidden;
+    transition:transform .2s ease, visibility 0s linear .2s;
+  }
+  #bottombar.visible{
+    transform:translateY(0);
+    visibility:visible;
+    transition:transform .2s ease, visibility 0s;
+  }
+  /* Réserve la place de la barre sous la dernière ligne */
+  #table-wrap{ padding-bottom:48px; }
+  .gear-btn{
+    border:1px solid transparent;background:transparent;
+    color:var(--texte-clair);font-size:18px;line-height:1;
+    border-radius:4px;padding:3px 7px;cursor:pointer;
+  }
+  .gear-btn:hover{background:#e8e8fb;border-color:#c7c7f5;color:var(--bleu-france);}
+  .ssdir-badge{
+    background:var(--bleu-france);color:#fff;border-radius:12px;
+    padding:3px 12px;font-size:12px;font-weight:600;white-space:nowrap;
+  }
+  #bottombar .gear-btn{ margin-left:auto; }
 </style>
 </head>
 <body>
@@ -518,11 +544,8 @@
   </div>
   <div id="topbar">
     <div class="titre">Suivi DG / DGA</div>
-    <div class="switch-wrap">
-      <span class="switch-label" id="switch-label-mine">Ma sous-direction</span>
-      <div class="switch" id="switch-mine"><div class="knob"></div></div>
-      <select id="my-ssdir-select" style="display:none" title="Sous-direction"></select>
-    </div>
+    <span id="my-ssdir-badge" class="ssdir-badge" style="display:none"></span>
+   
     <input type="search" id="search-input" placeholder="🔍 Rechercher (date, intitulé, observations)…" autocomplete="off">
     <div class="switch-wrap">
       <span class="switch-label" id="switch-label-editmode">Édition rapide</span>
@@ -539,6 +562,14 @@
   </div>
   <div id="table-wrap">
     <div id="loading">Chargement…</div>
+  </div>
+  <div id="bottombar">
+    <div class="switch-wrap">
+      <span class="switch-label" id="switch-label-mine">Ma sous-direction</span>
+      <div class="switch" id="switch-mine"><div class="knob"></div></div>
+      <select id="my-ssdir-select" style="display:none" title="Votre sous-direction"></select>
+    <button type="button" id="opt-gear" class="gear-btn" title="Configuration de la vue">⚙</button>
+    </div>
   </div>
 </div>
 
@@ -559,7 +590,18 @@
     </footer>
   </div>
 </div>
-
+<div id="opt-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:200;align-items:center;justify-content:center;">
+  <div style="background:#fff;border-radius:8px;padding:18px 22px;max-width:420px;box-shadow:0 10px 30px rgba(0,0,0,.3);">
+    <h3 style="margin:0 0 12px;color:var(--bleu-france);font-size:15px;">Configuration de la vue</h3>
+    <label style="display:flex;gap:8px;align-items:center;cursor:pointer;">
+      <input type="checkbox" id="opt-filtre-ssdir">
+      Filtrer sur ma sous-direction au démarrage
+    </label>
+    <div style="margin-top:16px;text-align:right;">
+      <button type="button" id="opt-close" class="fiche-validate">Fermer</button>
+    </div>
+  </div>
+</div>
 <script>
 const TABLE_ID = 'SuiviDG_DGA';
 
@@ -875,7 +917,15 @@ function recMatchesMySsDir(rec){
 }
 
 function updateFilteringClass(){
-  document.body.classList.toggle('filtering', !!searchQuery || (myFilter && mySsDirIds.size > 0));
+  const actif = myFilter && mySsDirIds.size > 0;
+  document.body.classList.toggle('filtering', !!searchQuery || actif);
+  const badge = document.getElementById('my-ssdir-badge');
+  if (actif){
+    badge.textContent = 'Sous-direction : ' + [...mySsDirIds].map(entName).join(', ');
+    badge.style.display = '';
+  } else {
+    badge.style.display = 'none';
+  }
 }
 
 // ---------- Colonnes RefList : configuration de la référence multiple ----------
@@ -2246,6 +2296,7 @@ function attachFicheHandlers(rowId){
   });
   attachDossierFicheHandlers(overlay, rowId);
   attachReflistHandlers(overlay, rowId);
+   
 }
 
 function ficheAutoGrow(el){
@@ -2644,6 +2695,20 @@ function attachHandlers(){
       addRow(computeInsertDate(recA, recB));
     });
   });
+   // ---------- Barre du bas : visible seulement quand la grille est défilée jusqu'en bas ----------
+  const bottomBar = document.getElementById('bottombar');
+  const tableWrapEl = document.getElementById('table-wrap');
+  function updateBottomBar(){
+    const reste = tableWrapEl.scrollHeight - tableWrapEl.scrollTop - tableWrapEl.clientHeight;
+    // Visible aussi quand tout le contenu tient à l'écran (pas de défilement)
+    bottomBar.classList.toggle('visible', reste <= 4);
+  }
+  tableWrapEl.addEventListener('scroll', updateBottomBar, { passive: true });
+  window.addEventListener('resize', updateBottomBar);
+  // render() remplace le contenu de #table-wrap : on recalcule après chaque reconstruction
+  new MutationObserver(() => requestAnimationFrame(updateBottomBar))
+    .observe(tableWrapEl, { childList: true });
+  updateBottomBar();
 }
 
 // ---------- Impression du tableau (A4 paysage) ----------
@@ -2863,14 +2928,15 @@ searchInput.addEventListener('keydown', e => {
 //écouteur recherche
 const swMine = document.getElementById('switch-mine');
 const mineSelect = document.getElementById('my-ssdir-select');
-function toggleMine(){
-  myFilter = !myFilter;
+function setMyFilter(value){
+  myFilter = !!value;
   swMine.classList.toggle('on', myFilter);
   fillMySsDirSelect();
   updateFilteringClass();
   render();
   document.getElementById('table-wrap').scrollTop = 0;
 }
+function toggleMine(){ setMyFilter(!myFilter); }
 swMine.addEventListener('click', toggleMine);
 document.getElementById('switch-label-mine').addEventListener('click', toggleMine);
 mineSelect.addEventListener('change', e => {
@@ -2993,8 +3059,32 @@ document.addEventListener('keydown', e => {
 document.querySelector('#write-error-banner .write-error-close').addEventListener('click', hideWriteError);
 
 // ---------- Initialisation Grist ----------
-grist.ready({ requiredAccess: 'full' });
-
+grist.ready({
+  requiredAccess: 'full',
+  onEditOptions: () => {
+    document.getElementById('opt-filtre-ssdir').checked = lastFiltreOption === true;
+    document.getElementById('opt-overlay').style.display = 'flex';
+  },
+});
+let lastFiltreOption = null;
+grist.onOptions(options => {
+  const v = !!(options && options.filtreSsDir);
+  if (v === lastFiltreOption) return;   // ne réagit qu'à un vrai changement de l'option
+  lastFiltreOption = v;
+  if (v !== myFilter) setMyFilter(v);
+  document.querySelector('#switch-mine').closest('.switch-wrap').style.display =
+  (options && options.verrouSsDir) ? 'none' : '';
+});
+document.getElementById('opt-filtre-ssdir').addEventListener('change', e => {
+  grist.setOption('filtreSsDir', e.target.checked); // enregistré dans la vue ; onOptions se déclenche ensuite
+});
+document.getElementById('opt-close').addEventListener('click', () => {
+  document.getElementById('opt-overlay').style.display = 'none';
+});
+document.getElementById('opt-gear').addEventListener('click', () => {
+  document.getElementById('opt-filtre-ssdir').checked = lastFiltreOption === true;
+  document.getElementById('opt-overlay').style.display = 'flex';
+});
 perfLog('script chargé → grist.ready()');
 let perfLastRecords = null;
 grist.onRecords(records => {
