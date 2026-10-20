@@ -540,6 +540,11 @@
     font-size:12px;font-weight:600;line-height:1.6;white-space:nowrap;
     border:1px solid transparent;
   }
+  td.col-heure .etat-pill{
+    display:block;
+    width:max-content;
+    margin:0 auto 3px;
+  }
   .etat-attente{ background:#fdecea;color:#b71c1c;border-color:#f3b4ac; }
   .etat-partiel{ background:#fff4c2;color:#7a5b00;border-color:#f0d95c; }
   .etat-complet{ background:#e3f4e8;color:#18753c;border-color:#9fd3ae; }
@@ -1690,7 +1695,7 @@ function render(){
   if (participationCollapsed){
     html += `<th class="th-participation-sub grp-collapsed-head" data-group="participation" title="Cliquer pour déplier">Participation</th>`;
   } else {
-    html += `<th class="th-participation-sub col-hote">DG(A) ou représentation</th><th class="th-participation-sub">Composition de la délégation</th><th class="th-participation-sub" title="(services)">Participation souhaitée</th><th class="th-participation-sub">Participants désignés</th>`;
+    html += `<th class="th-participation-sub col-hote">DG(A) ou représentation</th><th class="th-participation-sub">Composition de la délégation</th><th class="th-participation-sub">Participation souhaitée (services)</th><th class="th-participation-sub">Participants désignés</th>`;
   }
 
   if (dossierCollapsed){
