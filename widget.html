@@ -534,6 +534,19 @@
     padding:3px 12px;font-size:12px;font-weight:600;white-space:nowrap;
   }
   #bottombar .gear-btn{ margin-left:auto; }
+  /* Etat des dossiers : Attente = rouge, Partiel = jaune, Complet = vert */
+  .etat-pill{
+    display:inline-block;padding:1px 10px;border-radius:12px;
+    font-size:12px;font-weight:600;line-height:1.6;white-space:nowrap;
+    border:1px solid transparent;
+  }
+  .etat-attente{ background:#fdecea;color:#b71c1c;border-color:#f3b4ac; }
+  .etat-partiel{ background:#fff4c2;color:#7a5b00;border-color:#f0d95c; }
+  .etat-complet{ background:#e3f4e8;color:#18753c;border-color:#9fd3ae; }
+  /* Même couleurs sur la liste déroulante en édition rapide */
+  select.d-etat.etat-attente{ background:#fdecea;color:#b71c1c;border-color:#f3b4ac; }
+  select.d-etat.etat-partiel{ background:#fff4c2;color:#7a5b00;border-color:#f0d95c; }
+  select.d-etat.etat-complet{ background:#e3f4e8;color:#18753c;border-color:#9fd3ae; }
 </style>
 </head>
 <body>
@@ -567,7 +580,7 @@
     <div class="switch-wrap">
       <span class="switch-label" id="switch-label-mine">Ma sous-direction</span>
       <div class="switch" id="switch-mine"><div class="knob"></div></div>
-      <select id="my-ssdir-select" style="display:none" title="Votre sous-direction"></select>
+      <select id="my-ssdir-select" style="display:none" title="Ma sous-direction"></select>
     <button type="button" id="opt-gear" class="gear-btn" title="Configuration de la vue">⚙</button>
     </div>
   </div>
@@ -921,7 +934,8 @@ function updateFilteringClass(){
   document.body.classList.toggle('filtering', !!searchQuery || actif);
   const badge = document.getElementById('my-ssdir-badge');
   if (actif){
-    badge.textContent = 'Sous-direction : ' + [...mySsDirIds].map(entName).join(', ');
+    //badge.textContent = 'Sous-direction : ' + [...mySsDirIds].map(entName).join(', ');
+    badge.textContent = [...mySsDirIds].map(entName).join(', ');
     badge.style.display = '';
   } else {
     badge.style.display = 'none';
@@ -1145,19 +1159,30 @@ function etatSelectHtml(cls, value, attrs){
   if (etatChoices && etatChoices.length){
     const list = [...etatChoices];
     if (value && !list.includes(value)) list.push(value);
-    return `<select class="${cls}" ${attrs || ''}><option value=""></option>` +
+   return `<select class="${cls} ${etatClass(value)}" ${attrs || ''}><option value=""></option>` +
       list.map(c => `<option value="${escapeAttr(c)}" ${c === value ? 'selected' : ''}>${escapeHtml(c)}</option>`).join('') + `</select>`;
   }
-  return `<input type="text" class="${cls}" ${attrs || ''} value="${escapeAttr(value)}">`;
+  return `<input type="text" class="${cls}" ${etatClass(value)}" ${attrs || ''} value="${escapeAttr(value)}">`;
+}
+// Insensible à la casse et aux accents ; renvoie '' si la valeur est inconnue
+function etatClass(v){
+  const k = normSearch(v).trim();
+  console.log("etat", k)
+  if (k === 'attente') return 'etat-attente';
+  if (k === 'partiel') return 'etat-partiel';
+  if (k === 'complet') return 'etat-complet';
+  return '';
 }
 
 // kind : 'sd' | 'bureau' | 'etat' — une .dos-line par dossier du RDV
 function dossierLinesHtml(rec, kind){
   const ds = dossiersByRdv.get(rec.id) || [];
   return ds.map(d => {
-    let inner;
+        let inner;
     if (!editMode){
-      inner = kind === 'sd' ? entChip(d.Sous_Direction) : kind === 'bureau' ? entChip(d.Bureau) : escapeHtml(d.Etat);
+      inner = kind === 'sd' ? entChip(d.Sous_Direction)
+            : kind === 'bureau' ? entChip(d.Bureau)
+            : (d.Etat ? `<span class="etat-pill ${etatClass(d.Etat)}">${escapeHtml(d.Etat)}</span>` : '');
     } else {
       const attrs = `data-did="${d.id}"`;
       if (kind === 'sd'){
@@ -1319,12 +1344,12 @@ function nextStatut(cur){
   return l[(i + 1) % l.length];
 }
 function statutStaticHtml(rec){
-  return rec.Statut ? `<div class="statut-static">${escapeHtml(rec.Statut)}</div>` : '';
+  return rec.EtatDossier ? `<div class="etat-pill ${etatClass(rec.EtatDossier)}">${escapeHtml(rec.EtatDossier)}</div>` : '';
 }
-function statutBtnHtml(cls, value){
+/*function statutBtnHtml(cls, value){
   const v = value || '?';
   return `<button type="button" class="statut-btn ${cls}${value ? '' : ' empty'}" title="Cliquer pour changer le statut">${escapeHtml(v)}</button>`;
-}
+}*/
 
 // Renvoie l'ensemble des identifiants d'entités "descendantes" d'une liste
 // d'entités racines, racines elles-mêmes incluses.
@@ -1665,13 +1690,13 @@ function render(){
   if (participationCollapsed){
     html += `<th class="th-participation-sub grp-collapsed-head" data-group="participation" title="Cliquer pour déplier">Participation</th>`;
   } else {
-    html += `<th class="th-participation-sub col-hote">Hôte</th><th class="th-participation-sub">Composition de la délégation</th><th class="th-participation-sub">Participation souhaitée (services)</th><th class="th-participation-sub">Participants désignés</th>`;
+    html += `<th class="th-participation-sub col-hote">DG(A) ou représentation</th><th class="th-participation-sub">Composition de la délégation</th><th class="th-participation-sub">Participation souhaitée (services)</th><th class="th-participation-sub">Participants désignés</th>`;
   }
 
   if (dossierCollapsed){
     html += `<th class="th-dossier-sub grp-collapsed-head" data-group="dossier" title="Cliquer pour déplier">Dossier</th>`;
   } else {
-    html += `<th class="th-dossier-sub">Dossier pour</th><th class="th-dossier-sub">Sous-dir</th><th class="th-dossier-sub">Bureau compétent</th><th class="th-dossier-sub col-etat">Etat</th>`;
+    html += `<th class="th-dossier-sub">Dossier pour</th><th class="th-dossier-sub">Services contributeurs</th><th class="th-dossier-sub" title="Le cas échéant">Unité contributrice</th><th class="th-dossier-sub col-etat">État des contributions</th>`;
   }
 
   html += `</tr>
@@ -1733,9 +1758,8 @@ function render(){
       }
     }
     if (editMode) {
-   //  html += `<td class="freeze-col col-heure">${heureCellHtml(rec, d)}${stickerHtml(rec)}</td>`;
-      html += `<td class="freeze-col col-heure">${statutBtnHtml('f-statut', rec.Statut || '')}${heureCellHtml(rec, d)}${stickerHtml(rec)}</td>`;
-
+      html += `<td class="freeze-col col-heure">${heureCellHtml(rec, d)}${stickerHtml(rec)}</td>`;
+      //html += `<td class="freeze-col col-heure">${statutBtnHtml('f-statut', rec.Statut || '')}${heureCellHtml(rec, d)}${stickerHtml(rec)}</td>`;
      html += `<td class="col-intitule freeze-col freeze-edge"><div class="intitule-wrap"><button type="button" class="fiche-btn" title="Voir en fiche">▤</button>${textFieldHtml('Intitule', rec.Intitule)}</div></td>`;
     } else {
     //html += `<td class="freeze-col col-heure">${staticHeureHtml(rec, d)}${stickerHtml(rec)}</td>`;
@@ -1981,7 +2005,7 @@ function openFiche(rowId, keepDraft){
   // Zone 1 (sans titre) : Date RDV, Heure, Toute la journée, Jour férié sur
   // une même ligne, puis Intitulé.
   body += `<div class="fiche-row4">`;
-  body += fieldRowHtml('Statut', statutBtnHtml('fiche-statut', rec.Statut || ''), 'fiche-field-centered');
+  //body += fieldRowHtml('Statut', statutBtnHtml('fiche-statut', rec.Statut || ''), 'fiche-field-centered');
   body += fieldRowHtml('Date RDV', `<input type="date" class="fiche-date" value="${d ? toInputDate(d) : ''}">`);
   body += fieldRowHtml('Heure', `<input type="time" class="fiche-heure" value="${d ? toInputTime(d) : ''}">`);
   body += fieldRowHtml('Toute la journée', `<input type="checkbox" class="fiche-all-day" ${rec.IsAllDay ? 'checked' : ''}>`, 'fiche-field-centered');
@@ -2660,6 +2684,7 @@ function attachHandlers(){
 
     tr.querySelectorAll('.grp-collapsed-cell').forEach(cell => {
       cell.addEventListener('click', () => toggleGroup(cell.dataset.group));
+      });
 
     tr.querySelectorAll('.d-sd').forEach(s => s.addEventListener('change', e =>
       updateDossier(Number(s.dataset.did), { Sous_Direction: Number(e.target.value) || 0, Bureau: 0 })));
@@ -2671,9 +2696,10 @@ function attachHandlers(){
       ta.addEventListener('change', e =>
         updateDossier(Number(ta.dataset.did), { Observation: e.target.value }));
     });
-    tr.querySelectorAll('.d-etat').forEach(s => s.addEventListener('change', e =>
-      updateDossier(Number(s.dataset.did), { Etat: e.target.value })));  
-    });
+   tr.querySelectorAll('.d-etat').forEach(s => s.addEventListener('change', e => {
+      s.className = `d-etat ${etatClass(e.target.value)}`;
+      updateDossier(Number(s.dataset.did), { Etat: e.target.value });
+    }));
   });
 
   document.querySelectorAll('.grp-toggle').forEach(btn => {
@@ -2795,7 +2821,7 @@ function printTable(){
     rows += cell(rec.Dossier_pour);
     rows += `<td>${dosCol(rec, d => chipP(d.Sous_Direction))}</td>`;
     rows += `<td>${dosCol(rec, d => chipP(d.Bureau) + (d.Observation ? `<div style="font-size:8px;font-style:italic;color:#666">${escapeHtml(d.Observation)}</div>` : ''))}</td>`;
-    rows += `<td>${dosCol(rec, d => escapeHtml(d.Etat))}</td>`;
+    rows += `<td>${dosCol(rec, d => d.Etat ? `<span class="etat-pill ${etatClass(d.Etat)}">${escapeHtml(d.Etat)}</span>` : '')}</td>`;
  
     rows += cell(rec.Observation);
     //rows += `<td class="center recu">${hasRecuColumn !== false && rec.Recu ? '✓' : ''}</td>`;
@@ -2838,6 +2864,10 @@ function printTable(){
   .h-dossier{ background:#70AD47; color:#fff; }
   .s-dossier{ background:#A8D08E; color:#1e1e1e; }
   .h-other{ background:#8497B0; color:#fff; }
+  .etat-pill{ display:inline-block; padding:0 6px; border-radius:8px; font-weight:700; border:1px solid transparent; }
+  .etat-attente{ background:#fdecea; color:#b71c1c; border-color:#f3b4ac; }
+  .etat-partiel{ background:#fff4c2; color:#7a5b00; border-color:#f0d95c; }
+  .etat-complet{ background:#e3f4e8; color:#18753c; border-color:#9fd3ae; }
 
   /* Puces : la couleur propre à chaque entité arrive en style inline */
   .chip{
