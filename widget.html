@@ -249,6 +249,8 @@
   th.th-creneau-sub{background:#8EAADC;color:#1e1e1e;text-align:center;}
   th.th-nature-header{background:#D0CECE;color:#1e1e1e;}
   th.th-nature-sub{background:#ECECEC;color:#1e1e1e;text-align:center;}
+  th.th-odj{background:#ECECEC;color:#1e1e1e;text-align:center;}
+  td.col-odj{min-width:220px;}
   th.th-dossier-header{background:#70AD47;color:#fff;}
   th.th-dossier-sub{background:#A8D08E;color:#1e1e1e;text-align:center;}
   th.th-participation-header{background:#FF5050;color:#fff;}
@@ -508,32 +510,20 @@
   }
   /* "+" d'insertion masqué pendant une recherche ou un filtre */
   body.filtering .add-btn{display:none;}
-  #bottombar{
-    position:fixed;left:0;right:0;bottom:0;
-    z-index:60;
-    box-shadow:0 -2px 6px rgba(0,0,0,.12);
-    transform:translateY(100%);
-    visibility:hidden;
-    transition:transform .2s ease, visibility 0s linear .2s;
-  }
-  #bottombar.visible{
-    transform:translateY(0);
-    visibility:visible;
-    transition:transform .2s ease, visibility 0s;
-  }
-  /* Réserve la place de la barre sous la dernière ligne */
-  #table-wrap{ padding-bottom:48px; }
-  .gear-btn{
-    border:1px solid transparent;background:transparent;
-    color:var(--texte-clair);font-size:18px;line-height:1;
-    border-radius:4px;padding:3px 7px;cursor:pointer;
-  }
-  .gear-btn:hover{background:#e8e8fb;border-color:#c7c7f5;color:var(--bleu-france);}
   .ssdir-badge{
     background:var(--bleu-france);color:#fff;border-radius:12px;
     padding:3px 12px;font-size:12px;font-weight:600;white-space:nowrap;
   }
-  #bottombar .gear-btn{ margin-left:auto; }
+  .gear-btn{
+  position:fixed;z-index:60;right:24px;bottom:24px; /* ajustés en JS selon les ascenseurs */
+  width:34px;height:34px;border-radius:50%;
+  border:1px solid var(--gris-bordure);background:#fff;
+  color:var(--texte-clair);font-size:18px;line-height:1;
+  cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.25);
+  display:flex;align-items:center;justify-content:center;
+}
+.gear-btn:hover{background:#e8e8fb;border-color:#c7c7f5;color:var(--bleu-france);}
+ 
   /* Etat des dossiers : Attente = rouge, Partiel = jaune, Complet = vert */
   .etat-pill{
     display:inline-block;padding:1px 10px;border-radius:12px;
@@ -581,14 +571,7 @@
   <div id="table-wrap">
     <div id="loading">Chargement…</div>
   </div>
-  <div id="bottombar">
-    <div class="switch-wrap">
-      <span class="switch-label" id="switch-label-mine">Ma sous-direction</span>
-      <div class="switch" id="switch-mine"><div class="knob"></div></div>
-      <select id="my-ssdir-select" style="display:none" title="Ma sous-direction"></select>
-    <button type="button" id="opt-gear" class="gear-btn" title="Configuration de la vue">⚙</button>
-    </div>
-  </div>
+  <button type="button" id="opt-gear" class="gear-btn" title="Configuration de la vue">⚙</button>
 </div>
 
 <div id="fiche-overlay" class="hidden">
@@ -609,9 +592,16 @@
   </div>
 </div>
 <div id="opt-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:200;align-items:center;justify-content:center;">
-  <div style="background:#fff;border-radius:8px;padding:18px 22px;max-width:420px;box-shadow:0 10px 30px rgba(0,0,0,.3);">
-    <h3 style="margin:0 0 12px;color:var(--bleu-france);font-size:15px;">Configuration de la vue</h3>
-    <label style="display:flex;gap:8px;align-items:center;cursor:pointer;">
+  <div style="background:#fff;border-radius:8px;padding:18px 22px;max-width:420px;width:90%;box-shadow:0 10px 30px rgba(0,0,0,.3);">
+    <h3 style="margin:0 0 14px;color:var(--bleu-france);font-size:15px;">Configuration de la vue</h3>
+
+    <div class="switch-wrap">
+      <span class="switch-label" id="switch-label-mine">Ma sous-direction</span>
+      <div class="switch" id="switch-mine"><div class="knob"></div></div>
+    </div>
+    <select id="my-ssdir-select" style="display:none;width:100%;max-width:none;margin:10px 0 0;" title="Ma sous-direction"></select>
+
+    <label style="display:flex;gap:8px;align-items:center;cursor:pointer;margin-top:16px;">
       <input type="checkbox" id="opt-filtre-ssdir">
       Filtrer sur ma sous-direction au démarrage
     </label>
@@ -1672,7 +1662,7 @@ function render(){
   let html = `<table><thead>
     <tr>
       <th class="th-creneau-header freeze-col" colspan="${nbCreneauCols}">Créneau</th>
-      <th class="th-nature-header freeze-col freeze-edge">Nature du RDV</th>
+      <th class="th-nature-header" colspan="2">Nature du RDV</th>
       <th class="th-participation-header" colspan="${nbParticipationCols}">Participation
         <button type="button" class="grp-toggle" data-group="participation" title="${participationCollapsed?'Déplier':'Replier'} le bloc Participation">${participationToggleIcon}</button>
       </th>
@@ -1690,12 +1680,13 @@ function render(){
   html += `</tr>
     <tr>
       ${isMobileView ? '' : '<th class="th-creneau-sub freeze-col col-jour">Jour</th>'}<th class="th-creneau-sub freeze-col col-date">Date RDV</th><th class="th-creneau-sub freeze-col col-heure">Heure</th>
-      <th class="th-nature-sub freeze-col freeze-edge">Intitulé</th>`;
+      <th class="th-nature-sub freeze-col freeze-edge">Intitulé</th>
+      <th class="th-odj">Ordre du jour</th>`;
 
   if (participationCollapsed){
     html += `<th class="th-participation-sub grp-collapsed-head" data-group="participation" title="Cliquer pour déplier">Participation</th>`;
   } else {
-    html += `<th class="th-participation-sub col-hote">DG(A) ou représentation</th><th class="th-participation-sub">Composition de la délégation</th><th class="th-participation-sub" title="(services)">Participation souhaitée</th><th class="th-participation-sub">Participants désignés</th>`;
+    html += `<th class="th-participation-sub col-hote">DG(A) ou représentation</th><th class="th-participation-sub">Composition de la délégation</th><th class="th-participation-sub" title="(services)">Participation souhaitée </th><th class="th-participation-sub">Participants désignés</th>`;
   }
 
   if (dossierCollapsed){
@@ -1766,11 +1757,13 @@ function render(){
       html += `<td class="freeze-col col-heure">${heureCellHtml(rec, d)}${stickerHtml(rec)}</td>`;
       //html += `<td class="freeze-col col-heure">${statutBtnHtml('f-statut', rec.Statut || '')}${heureCellHtml(rec, d)}${stickerHtml(rec)}</td>`;
      html += `<td class="col-intitule freeze-col freeze-edge"><div class="intitule-wrap"><button type="button" class="fiche-btn" title="Voir en fiche">▤</button>${textFieldHtml('Intitule', rec.Intitule)}</div></td>`;
+     html += `<td class="col-odj">${textFieldHtml('ODJ', rec.ODJ)}</td>`;
     } else {
     //html += `<td class="freeze-col col-heure">${staticHeureHtml(rec, d)}${stickerHtml(rec)}</td>`;
      html += `<td class="freeze-col col-heure">${statutStaticHtml(rec)}${staticHeureHtml(rec, d)}${stickerHtml(rec)}</td>`;
  
      html += `<td class="col-intitule freeze-col freeze-edge"><div class="intitule-wrap"><button type="button" class="fiche-btn" title="Voir en fiche">▤</button>${staticFieldHtml(rec.Intitule)}</div></td>`;
+     html += `<td class="col-odj">${staticFieldHtml(rec.ODJ)}</td>`;
     }
     if (participationCollapsed){
       html += `<td class="grp-collapsed-cell" data-group="participation" title="Cliquer pour déplier">…</td>`;
@@ -1824,6 +1817,7 @@ function render(){
   syncStickyHeaderOffsets();
   syncStickyLeftOffsets();
   syncDossierLines();
+  positionGear();
   pr.tEnd = performance.now();
   if (PERF_LOG){
     const ms = (a, b) => Math.round(b - a);
@@ -1911,7 +1905,7 @@ function syncStickyLeftOffsets(){
 
   // En-têtes fusionnées (lignes 1 et 2) : Créneau démarre à 0, Nature du RDV à lIntitule
   document.querySelectorAll('.th-creneau-header, .th-creneau-sub').forEach(el => { el.style.left = '0px'; });
-  document.querySelectorAll('.th-nature-header, .th-nature-sub').forEach(el => { el.style.left = `${lIntitule}px`; });
+  document.querySelectorAll('.th-nature-header.freeze-col, .th-nature-sub.freeze-col').forEach(el => { el.style.left = `${lIntitule}px`; });
 
   // Ligne 3 (une cellule par colonne)
   if (thJour) thJour.style.left = `${lJour}px`;
@@ -2021,6 +2015,7 @@ function openFiche(rowId, keepDraft){
   //if (d) body += `<div><button type="button" class="fiche-reprog" title="Supprime la date et l'heure (effectif après « Valider »)">📅 À reprogrammer</button></div>`;
 
   body += fieldRowHtml('Intitulé', `<textarea class="fiche-field-input" data-col="Intitule" rows="2">${escapeHtml(rec.Intitule)}</textarea>`);
+  body += fieldRowHtml('Ordre du jour', `<textarea class="fiche-field-input" data-col="ODJ" rows="3">${escapeHtml(rec.ODJ)}</textarea>`);
 
   // Zone "Participation"
   body += `<div class="fiche-section section section-participation"><div class="fiche-section-title">Participation</div>`;
@@ -2728,20 +2723,7 @@ function attachHandlers(){
       addRow(computeInsertDate(recA, recB));
     });
   });
-   // ---------- Barre du bas : visible seulement quand la grille est défilée jusqu'en bas ----------
-  const bottomBar = document.getElementById('bottombar');
-  const tableWrapEl = document.getElementById('table-wrap');
-  function updateBottomBar(){
-    const reste = tableWrapEl.scrollHeight - tableWrapEl.scrollTop - tableWrapEl.clientHeight;
-    // Visible aussi quand tout le contenu tient à l'écran (pas de défilement)
-    bottomBar.classList.toggle('visible', reste <= 4);
-  }
-  tableWrapEl.addEventListener('scroll', updateBottomBar, { passive: true });
-  window.addEventListener('resize', updateBottomBar);
-  // render() remplace le contenu de #table-wrap : on recalcule après chaque reconstruction
-  new MutationObserver(() => requestAnimationFrame(updateBottomBar))
-    .observe(tableWrapEl, { childList: true });
-  updateBottomBar();
+   
 }
 
 // ---------- Impression du tableau (A4 paysage) ----------
@@ -3094,7 +3076,15 @@ document.addEventListener('keydown', e => {
 
 // ---------- Bandeau d'erreur d'écriture : fermeture ----------
 document.querySelector('#write-error-banner .write-error-close').addEventListener('click', hideWriteError);
-
+// Place le ⚙ juste au-dessus/à gauche des ascenseurs pour ne jamais les recouvrir
+function positionGear(){
+  const w = document.getElementById('table-wrap');
+  const g = document.getElementById('opt-gear');
+  g.style.bottom = (w.offsetHeight - w.clientHeight + 10) + 'px';
+  g.style.right  = (w.offsetWidth  - w.clientWidth  + 10) + 'px';
+}
+new ResizeObserver(positionGear).observe(document.getElementById('table-wrap'));
+window.addEventListener('resize', positionGear);
 // ---------- Initialisation Grist ----------
 grist.ready({
   requiredAccess: 'full',
