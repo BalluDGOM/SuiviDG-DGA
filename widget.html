@@ -527,6 +527,7 @@
   /* Etat des dossiers : Attente = rouge, Partiel = jaune, Complet = vert */
   .etat-pill{
     display:inline-block;padding:1px 10px;border-radius:12px;
+
     font-size:12px;font-weight:600;line-height:1.6;white-space:nowrap;
     border:1px solid transparent;
   }
@@ -551,7 +552,7 @@
     <button type="button" class="write-error-close" title="Fermer">✕</button>
   </div>
   <div id="topbar">
-    <div class="titre">Suivi DG / DGA</div>
+    <div class="titre">Audiences et dossiers DG(-A)</div>
     <span id="my-ssdir-badge" class="ssdir-badge" style="display:none"></span>
    
     <input type="search" id="search-input" placeholder="🔍 Rechercher (date, intitulé, observations)…" autocomplete="off">
@@ -1128,6 +1129,37 @@ async function updateDossier(did, changes){
   render();
 }
 
+async function addDossier(rdvId, sdId){
+  try{
+    await grist.docApi.applyUserActions([['AddRecord', DOSSIERS_TABLE_ID, null,
+      { RDV: rdvId, Sous_Direction: sdId, Bureau: 0, Etat: '', Observation: '' }]]);
+    setStatut('Dossier ajouté ✓', false);
+    hideWriteError();
+  }catch(e){
+    console.error(e);
+    setStatut("Échec de l'ajout", true);
+    showWriteError(e, 'ajouter ce dossier');
+  }
+  await loadDossiers();
+  render();
+}
+
+async function deleteDossier(did){
+  const d = allDossiers.find(x => x.id === did);
+  if (d && (d.Bureau || d.Etat || d.Observation) && !confirm('Supprimer ce dossier (bureau, état et observation compris) ?')) return;
+  try{
+    await grist.docApi.applyUserActions([['RemoveRecord', DOSSIERS_TABLE_ID, did]]);
+    setStatut('Dossier supprimé ✓', false);
+    hideWriteError();
+  }catch(e){
+    console.error(e);
+    setStatut('Échec de la suppression', true);
+    showWriteError(e, 'supprimer ce dossier');
+  }
+  await loadDossiers();
+  render();
+}
+
 // --- Aides d'affichage (les noms/couleurs viennent de la table Entites déjà chargée)
 const ENT = () => refListConfigs.Participation_souhaitee;
 function entName(id){ return ENT().entityNameById.get(id) || `#${id}`; }
@@ -1157,7 +1189,7 @@ function etatSelectHtml(cls, value, attrs){
    return `<select class="${cls} ${etatClass(value)}" ${attrs || ''}><option value=""></option>` +
       list.map(c => `<option value="${escapeAttr(c)}" ${c === value ? 'selected' : ''}>${escapeHtml(c)}</option>`).join('') + `</select>`;
   }
-  return `<input type="text" class="${cls}" ${etatClass(value)}" ${attrs || ''} value="${escapeAttr(value)}">`;
+  return `<input type="text" class="${cls} ${etatClass(value)}" ${attrs || ''} value="${escapeAttr(value)}">`;
 }
 // Insensible à la casse et aux accents ; renvoie '' si la valeur est inconnue
 function etatClass(v){
@@ -1172,22 +1204,23 @@ function etatClass(v){
 // kind : 'sd' | 'bureau' | 'etat' — une .dos-line par dossier du RDV
 function dossierLinesHtml(rec, kind){
   const ds = dossiersByRdv.get(rec.id) || [];
-  return ds.map(d => {
-        let inner;
-    if (!editMode){
-      inner = kind === 'sd' ? entChip(d.Sous_Direction)
-            : kind === 'bureau' ? entChip(d.Bureau)
-            : (d.Etat ? `<span class="etat-pill ${etatClass(d.Etat)}">${escapeHtml(d.Etat)}</span>` : '');
-    } else {
-      const attrs = `data-did="${d.id}"`;
-      if (kind === 'sd'){
-        const others = new Set(ds.filter(x => x.id !== d.id).map(x => x.Sous_Direction));
-        inner = selectHtml('d-sd', sdOptions(d.Sous_Direction, others), d.Sous_Direction, attrs);
-      } else if (kind === 'bureau'){
-        inner = selectHtml('d-bureau', bureauOptions(d.Sous_Direction, d.Bureau), d.Bureau, attrs);
-      } else {
-        inner = etatSelectHtml('d-etat', d.Etat, attrs);
-      }
+  const chipBox = (id, removeCls, did, title) =>
+    `<div class="reflist-box"><div class="reflist-chips"><span class="reflist-chip"${chipColorStyle('Participation_souhaitee', id)}>${escapeHtml(entName(id))}<button type="button" class="reflist-chip-remove ${removeCls}" data-did="${did}" title="${title}">×</button></span></div></div>`;
+
+  const lines = ds.map(d => {
+    let inner;
+    const attrs = `data-did="${d.id}"`;
+    if (kind === 'etat'){
+      // Éditable dans les deux vues (normale et édition rapide)
+      inner = etatSelectHtml('d-etat', d.Etat, attrs);
+    } else if (!editMode){
+      inner = kind === 'sd' ? entChip(d.Sous_Direction) : entChip(d.Bureau);
+    } else if (kind === 'sd'){
+      inner = chipBox(d.Sous_Direction, 'd-del', d.id, 'Supprimer ce dossier');
+    } else { // bureau, édition rapide
+      inner = d.Bureau
+        ? chipBox(d.Bureau, 'd-b-rem', d.id, 'Retirer le bureau')
+        : `<div class="reflist-box">${selectHtml('d-bureau reflist-add', bureauOptions(d.Sous_Direction, 0), 0, attrs, '+ Choisir…')}</div>`;
     }
     if (kind === 'bureau'){
       if (editMode){
@@ -1198,6 +1231,11 @@ function dossierLinesHtml(rec, kind){
     }
     return `<div class="dos-line">${inner}</div>`;
   }).join('');
+
+  if (editMode && kind === 'sd'){
+    return lines + `<div class="dos-line">${selectHtml('d-add reflist-add', ENT().entities, 0, '', '+ Ajouter…')}</div>`;
+  }
+  return lines;
 }
 
 // Aligne la i-ème ligne de dossier entre les 3 colonnes (lectures groupées, puis écritures)
@@ -1244,7 +1282,7 @@ function buildDossierActions(rowId){
 }
 function dossiersFicheHtml(){
   const list = ficheDraft.dossiers.filter(d => !d.removed);
-  const used = new Set(list.map(d => d.Sous_Direction));
+ // const used = new Set(list.map(d => d.Sous_Direction));
   const cards = list.map(d => `
     <div class="dos-card" data-key="${d.key}">
       <div class="dos-card-head">${entChip(d.Sous_Direction)}
@@ -1252,21 +1290,31 @@ function dossiersFicheHtml(){
         <button type="button" class="del-btn dos-remove" title="Supprimer ce dossier">✕</button>
       </div>
       <div class="fiche-row2">
-        ${fieldRowHtml('Bureau compétent', selectHtml('dos-bureau', bureauOptions(d.Sous_Direction, d.Bureau), d.Bureau, ''))}
+        ${fieldRowHtml('Bureau compétent', bureauChipBoxHtml(d.Sous_Direction, d.Bureau))}
         ${fieldRowHtml('Etat', etatSelectHtml('dos-etat', d.Etat, ''))}
       </div>
       ${fieldRowHtml('Observation', `<textarea class="dos-obs" rows="2">${escapeHtml(d.Observation)}</textarea>`)}
     </div>`).join('');
-  const addSel = selectHtml('dos-add reflist-add', ENT().entities.filter(e => !used.has(e.id)), 0, '', '+ Ajouter une sous-direction…');
-  return `<div class="fiche-field"><label>Dossiers (un par sous-direction)</label>
+ // const addSel = selectHtml('dos-add reflist-add', ENT().entities.filter(e => !used.has(e.id)), 0, '', '+ Ajouter une sous-direction…');
+  const addSel = selectHtml('dos-add reflist-add', ENT().entities, 0, '', '+ Ajouter un dossier (sous-direction)…');
+  return `<div class="fiche-field"><label>Dossiers (un par bureau)</label>
     ${cards || '<div class="static-field" style="color:var(--texte-clair)">Aucun dossier</div>'}
     <div>${addSel}</div></div>`;
+}
+function bureauChipBoxHtml(sdId, bureauId){
+  if (bureauId){
+    return `<div class="reflist-box"><div class="reflist-chips"><span class="reflist-chip"${chipColorStyle('Participation_souhaitee', bureauId)}>${escapeHtml(entName(bureauId))}<button type="button" class="reflist-chip-remove dos-b-remove" title="Retirer">×</button></span></div></div>`;
+  }
+  return `<div class="reflist-box">${selectHtml('dos-b-add reflist-add', bureauOptions(sdId, 0), 0, '', '+ Choisir…')}</div>`;
 }
 function attachDossierFicheHandlers(overlay, rowId){
   overlay.querySelectorAll('.dos-card').forEach(card => {
     const d = ficheDraft.dossiers.find(x => x.key === card.dataset.key);
     if (!d) return;
-    card.querySelector('.dos-bureau').addEventListener('change', e => { d.Bureau = Number(e.target.value) || 0; updateFicheDirtyState(); });
+    const bAdd = card.querySelector('.dos-b-add');
+    if (bAdd) bAdd.addEventListener('change', e => { d.Bureau = Number(e.target.value) || 0; openFiche(rowId, true); });
+    const bRem = card.querySelector('.dos-b-remove');
+    if (bRem) bRem.addEventListener('click', () => { d.Bureau = 0; openFiche(rowId, true); });
     const etat = card.querySelector('.dos-etat');
     ['change','input'].forEach(ev => etat.addEventListener(ev, e => { d.Etat = e.target.value; updateFicheDirtyState(); }));
     const ta = card.querySelector('.dos-obs');
@@ -1654,7 +1702,7 @@ function render(){
   const nbDossierCols = dossierCollapsed ? 1 : 4;
   const nbParticipationCols = participationCollapsed ? 1 : 4;
   const nbCreneauCols = isMobileView ? 2 : 3; // pas de colonne "Jour" séparée en vue mobile
-  const nbColonnes = nbCreneauCols + 1 + nbParticipationCols + nbDossierCols + 1 + 1 ;  // Observations, Actions
+  const nbColonnes = nbCreneauCols + 2 + nbParticipationCols + nbDossierCols + 1 + 1 ;  // Observations, Actions
 
   const dossierToggleIcon = dossierCollapsed ? '▸' : '◂';
   const participationToggleIcon = participationCollapsed ? '▸' : '◂';
@@ -1763,7 +1811,7 @@ function render(){
      html += `<td class="freeze-col col-heure">${statutStaticHtml(rec)}${staticHeureHtml(rec, d)}${stickerHtml(rec)}</td>`;
  
      html += `<td class="col-intitule freeze-col freeze-edge"><div class="intitule-wrap"><button type="button" class="fiche-btn" title="Voir en fiche">▤</button>${staticFieldHtml(rec.Intitule)}</div></td>`;
-     html += `<td class="col-odj">${staticFieldHtml(rec.ODJ)}</td>`;
+     html += `<td class="col-odj">${truncatedFieldHtml(rec, 'ODJ', rec.ODJ)}</td>`;
     }
     if (participationCollapsed){
       html += `<td class="grp-collapsed-cell" data-group="participation" title="Cliquer pour déplier">…</td>`;
@@ -1776,7 +1824,7 @@ function render(){
         
 	  } else {
         html += `<td class="col-hote">${staticFieldHtml(hoteName(rec.Hote))}</td>`;
-        html += `<td>${staticFieldHtml(rec.Composition_delegation)}</td>`;
+        html += `<td>${truncatedFieldHtml(rec, 'Composition_delegation', rec.Composition_delegation)}</td>`;
         html += `<td>${staticRefListHtml('Participation_souhaitee', rec)}</td>`;
         html += `<td>${staticRefListHtml('Participants_designes', rec)} ${rec.Autres_participants ? `<div class="static-field static-autres">${escapeHtml(rec.Autres_participants)}</div>` : ''}</td>`;
       }
@@ -2188,13 +2236,16 @@ function printFiche(){
         <h1>${escapeHtml(rec.Intitule)}</h1>
 
         <table class="print-table print-table-body">
-          <thead class="print-table-head"><tr><th>Composition de la délégation</th><th>Participants</th></tr></thead>
+          <thead class="print-table-head"><tr><th>Composition de la délégation</th><th>Participants DGOM</th></tr></thead>
           <tbody><tr>
             <td style="white-space: pre-wrap;">${escapeHtml(rec.Composition_delegation)}</td>
             <td style="white-space: pre-wrap;">${escapeHtml(participants.join('\n'))}</td>
           </tr></tbody>
         </table>
-
+        <table class="print-table print-table-body">
+          <thead class="print-table-head"><tr><th>Ordre du jour</th></tr></thead>
+          <tbody><tr><td style="white-space: pre-wrap;">${escapeHtml(rec.ODJ)}</td></tr></tbody>
+        </table>
         <table class="print-table print-table-body">
           <thead class="print-table-head"><tr><th>Observations</th></tr></thead>
           <tbody><tr><td style="white-space: pre-wrap;">${escapeHtml(rec.Observation)}</td></tr></tbody>
@@ -2459,6 +2510,41 @@ function heureCellHtml(rec, d){
 function staticFieldHtml(value){
   return `<div class="static-field">${escapeHtml(value)}</div>`;
 }
+
+// ---------- Texte long : 100 premiers caractères + « […] » cliquable ----------
+// Un clic sur « […] » ou « ✕ » déplie/replie TOUS les textes longs de la ligne.
+const TRUNC_LIMIT = 200;
+const expandedRows = new Set(); // ids des lignes dépliées (conservé entre les rendus)
+
+function truncatedFieldHtml(rec, col, value){
+  const text = String(value ?? '');
+  const MORE_BTN_STYLE = 'appearance:none;-webkit-appearance:none;border:0;outline:none;box-shadow:none;background:transparent;color:#000091;font:inherit;font-weight:700;padding:0 2px;margin-left:20px;cursor:pointer;';
+  if (text.length <= TRUNC_LIMIT) return staticFieldHtml(text);
+  const attrs = `data-id="${rec.id}" data-col="${col}"`;
+  if (expandedRows.has(rec.id)){
+    return `<div class="static-field">${escapeHtml(text)} <button type="button" class="more-toggle" ${attrs} style="${MORE_BTN_STYLE}" title="Réduire">✕</button></div>`;
+  }
+  return `<div class="static-field">${escapeHtml(text.slice(0, TRUNC_LIMIT).trimEnd())} <button type="button" class="more-toggle" ${attrs} style="${MORE_BTN_STYLE}" title="Afficher la suite">[…]</button></div>`;
+}
+
+// Un seul écouteur délégué : ne reconstruit que les cellules de la ligne concernée
+document.getElementById('table-wrap').addEventListener('click', e => {
+  const b = e.target.closest('.more-toggle');
+  if (!b) return;
+  const rec = allRecords.find(r => r.id === Number(b.dataset.id));
+  if (!rec) return;
+  const tr = b.closest('tr');
+
+  if (expandedRows.has(rec.id)) expandedRows.delete(rec.id); else expandedRows.add(rec.id);
+
+  // On récupère d'abord tous les boutons de la ligne, puis on remplace leurs cellules
+  tr.querySelectorAll('.more-toggle').forEach(btn => {
+    const col = btn.dataset.col;
+    const field = btn.closest('.static-field');
+    if (field) field.outerHTML = truncatedFieldHtml(rec, col, rec[col]);
+  });
+});
+
 function staticHeureHtml(rec, d){
   if (rec.IsAllDay) return `<div class="all-day-label">Toute la journée</div>`;
   return `<div class="static-field static-heure">${d ? fmtHeure(d) : ''}</div>`;
@@ -2690,6 +2776,14 @@ function attachHandlers(){
       updateDossier(Number(s.dataset.did), { Sous_Direction: Number(e.target.value) || 0, Bureau: 0 })));
     tr.querySelectorAll('.d-bureau').forEach(s => s.addEventListener('change', e =>
       updateDossier(Number(s.dataset.did), { Bureau: Number(e.target.value) || 0 })));
+    tr.querySelectorAll('.d-add').forEach(s => s.addEventListener('change', e => {
+        const sd = Number(e.target.value);
+        if (sd) addDossier(rowId, sd);
+      }));
+      tr.querySelectorAll('.d-del').forEach(b => b.addEventListener('click', () =>
+        deleteDossier(Number(b.dataset.did))));
+      tr.querySelectorAll('.d-b-rem').forEach(b => b.addEventListener('click', () =>
+        updateDossier(Number(b.dataset.did), { Bureau: 0 })));
     tr.querySelectorAll('.d-obs').forEach(ta => {
       autoGrow(ta);
       ta.addEventListener('input', () => { autoGrow(ta); syncDossierLines(); });
@@ -2749,7 +2843,7 @@ function printTable(){
   const recs = getVisibleRecords();
   if (!recs.length){ setStatut('Aucun rendez-vous à imprimer.', true); return; }
 
-  const NB_COLS = 13;
+  const NB_COLS = 14;
   const cell = v => `<td>${escapeHtml(v)}</td>`;
 
   // Colonne de référence → puces colorées (même logique que l'écran :
@@ -2800,6 +2894,7 @@ function printTable(){
     }
     rows += `<td class="center">${rec.IsAllDay ? 'Toute la journée' : (d ? fmtHeure(d) : '')}</td>`;
     rows += cell(rec.Intitule);
+     rows += cell(rec.ODJ);
     rows += cell(hoteName(rec.Hote));
     rows += cell(rec.Composition_delegation);
     rows += `<td>${refChips('Participation_souhaitee', rec)}</td>`;
@@ -2851,7 +2946,7 @@ function printTable(){
   .h-dossier{ background:#70AD47; color:#fff; }
   .s-dossier{ background:#A8D08E; color:#1e1e1e; }
   .h-other{ background:#8497B0; color:#fff; }
-  .etat-pill{ display:inline-block; padding:0 6px; border-radius:8px; font-weight:700; border:1px solid transparent; }
+  .etat-pill{ display:inline-block; padding:0 6px; border-radius:8px; font-weight:700; border:1px solid transparent;    margin-top: 2px; margin-bottom: 2px;}
   .etat-attente{ background:#fdecea; color:#b71c1c; border-color:#f3b4ac; }
   .etat-partiel{ background:#fff4c2; color:#7a5b00; border-color:#f0d95c; }
   .etat-complet{ background:#e3f4e8; color:#18753c; border-color:#9fd3ae; }
@@ -2862,6 +2957,20 @@ function printTable(){
     border-radius:10px; padding:0 6px; margin:1px 3px 1px 0; line-height:1.5;
   }
   @media print{ .no-print{ display:none !important; } body{ margin:0; } }
+  button.more-toggle{
+    appearance:none;-webkit-appearance:none;
+    border:0 !important;
+    outline:none;
+    box-shadow:none;
+    background:transparent;
+    color:var(--bleu-france);
+    font:inherit;font-weight:700;
+    padding:0 2px;margin:0;
+    cursor:pointer;
+  }
+  button.more-toggle:hover{text-decoration:underline;}
+  /* garde un repère de focus, mais seulement pour la navigation au clavier */
+  button.more-toggle:focus-visible{outline:2px solid var(--bleu-france);outline-offset:1px;border-radius:2px;}
 </style></head>
 <body>
   <div class="no-print">
@@ -2871,14 +2980,16 @@ function printTable(){
   <h1>Suivi DG / DGA — rendez-vous à partir du ${escapeHtml(fmtDate(startOfToday()))}</h1>
   <table>
     <colgroup>
-      <col style="width:6%"><col style="width:6%"><col style="width:5%"><col style="width:12%">
-      <col style="width:6%"><col style="width:8%"><col style="width:8%"><col style="width:9%">
-      <col style="width:6%"><col style="width:7%"><col style="width:7%"><col style="width:5%"><col style="width:15%">
+      <col style="width:2%"><col style="width:4%"><col style="width:2%"> <!--8-->
+      <col style="width:14%"><col style="width:14%"> <!--28-->
+      <col style="width:3%"><col style="width:12%"><col style="width:4%"><col style="width:8%"> <!--27-->
+      <col style="width:4%"><col style="width:5%"><col style="width:5%"><col style="width:4%"> <!--18-->
+      <col style="width:19%"> <!--19->
     </colgroup>
     <thead>
       <tr>
         <th class="h-creneau" colspan="3">Créneau</th>
-        <th class="h-nature">Nature du RDV</th>
+        <th class="h-nature" colspan="2">Nature du RDV</th>
         <th class="h-participation" colspan="4">Participation</th>
         <th class="h-dossier" colspan="4">Dossier</th>
         <th class="h-other" rowspan="2">Observations</th>
@@ -2893,9 +3004,10 @@ function printTable(){
       <tr>
         <th class="s-creneau">Jour</th><th class="s-creneau">Date RDV</th><th class="s-creneau">Heure</th>
         <th class="s-nature">Intitulé</th>
+        <th class="s-nature">Ordre du jour</th>
         <th class="s-participation">Hôte</th>
         <th class="s-participation">Composition de la délégation</th><th class="s-participation">Participation souhaitée (services)</th><th class="s-participation">Participants désignés</th>
-        <th class="s-dossier">Dossier pour</th><th class="s-dossier">Sous-dir</th><th class="s-dossier">Bureau compétent</th><th class="s-dossier">Etat</th>
+        <th class="s-dossier">Dossier pour</th><th class="s-dossier">Sous-dir</th><th class="s-dossier">Bureau compétent</th><th class="s-dossier">Etat</th><th class="s-dossier">Observations</th>
       </tr>
     </thead>
     <tbody>${rows}</tbody>
