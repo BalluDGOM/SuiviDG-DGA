@@ -595,17 +595,9 @@
 <div id="opt-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:200;align-items:center;justify-content:center;">
   <div style="background:#fff;border-radius:8px;padding:18px 22px;max-width:420px;width:90%;box-shadow:0 10px 30px rgba(0,0,0,.3);">
     <h3 style="margin:0 0 14px;color:var(--bleu-france);font-size:15px;">Configuration de la vue</h3>
-
-    <div class="switch-wrap">
-      <span class="switch-label" id="switch-label-mine">Ma sous-direction</span>
-      <div class="switch" id="switch-mine"><div class="knob"></div></div>
-    </div>
-    <select id="my-ssdir-select" style="display:none;width:100%;max-width:none;margin:10px 0 0;" title="Ma sous-direction"></select>
-
-    <label style="display:flex;gap:8px;align-items:center;cursor:pointer;margin-top:16px;">
-      <input type="checkbox" id="opt-filtre-ssdir">
-      Filtrer sur ma sous-direction au démarrage
-    </label>
+    <label for="my-ssdir-select" style="font-size:13px;">Filtrer sur une sous-direction</label>
+    <select id="my-ssdir-select" style="display:block;width:100%;max-width:none;margin:6px 0 0;"></select>
+    <p style="margin:10px 0 0;font-size:12px;color:var(--texte-clair);">Ce filtre est enregistré dans le widget et partagé avec tous les utilisateurs.</p>
     <div style="margin-top:16px;text-align:right;">
       <button type="button" id="opt-close" class="fiche-validate">Fermer</button>
     </div>
@@ -871,50 +863,13 @@ async function loadDossierChoices(){
   dossierChoices = await fetchChoicesFor('Dossier_pour');
   etatChoices = await fetchChoicesFor('Etat', DOSSIERS_TABLE_ID);
 }
-// ---------- Filtre « Ma sous-direction » ----------
-function ssDirValueToIds(v){
-  // NomSsDir peut être une référence (id) ou un texte (nom)
-  if (typeof v === 'number') return v > 0 ? [v] : [];
-  if (Array.isArray(v)) return v.filter(x => typeof x === 'number');
-  if (typeof v === 'string' && v){
-    const names = ENT().entityNameById;
-    for (const [id, name] of names) if (name.trim().toLowerCase() === v.trim().toLowerCase()) return [id];
-  }
-  return [];
-}
-async function detectMySsDir(){
-  try{
-    // Table des utilisateurs : celle déjà détectée pour Participants_designes,
-    // sinon "Utilisateurs" par défaut
-    const tableId = refListConfigs.Participants_designes.entityTableId || 'Utilisateurs';
-    const t = await grist.docApi.fetchTable(tableId);
-    if (!t.Moi || !t.NomSsDir){
-      console.warn(`Colonnes "Moi" ou "NomSsDir" introuvables dans ${tableId}.`);
-      return;
-    }
-    // La colonne "Moi" est une formule : vrai uniquement sur la ligne de l'utilisateur connecté
-    const i = t.Moi.findIndex(v => v === true);
-    if (i === -1){
-      console.warn('Aucune ligne avec Moi = true : utilisateur connecté non trouvé.');
-      return;
-    }
-    const ids = ssDirValueToIds(t.NomSsDir[i]);
-    if (ids.length){
-      mySsDirIds = new Set(ids);
-    } else {
-      console.warn('NomSsDir vide ou non reconnue pour cet utilisateur :', t.NomSsDir[i]);
-    }
-  }catch(e){
-    console.warn('Détection de la sous-direction impossible.', e);
-  }
-}
+
 
 function fillMySsDirSelect(){
   const sel = document.getElementById('my-ssdir-select');
   const cur = [...mySsDirIds][0] || 0;
-  sel.innerHTML = //`<option value="">— Ma sous-direction —</option>` +
+  sel.innerHTML = `<option value="">— Toutes les sous-directions —</option>` +
     ENT().entities.map(e => `<option value="${e.id}" ${e.id === cur ? 'selected' : ''}>${escapeHtml(e.name)}</option>`).join('');
-  sel.style.display = myFilter ? '' : 'none';
 }
 
 function recMatchesMySsDir(rec){
@@ -3057,19 +3012,10 @@ searchInput.addEventListener('keydown', e => {
 });
 
 //écouteur recherche
-const swMine = document.getElementById('switch-mine');
 const mineSelect = document.getElementById('my-ssdir-select');
-function setMyFilter(value){
-  myFilter = !!value;
-  swMine.classList.toggle('on', myFilter);
-  fillMySsDirSelect();
-  updateFilteringClass();
-  render();
-  document.getElementById('table-wrap').scrollTop = 0;
-}
-function toggleMine(){ setMyFilter(!myFilter); }
-swMine.addEventListener('click', toggleMine);
-document.getElementById('switch-label-mine').addEventListener('click', toggleMine);
+
+//swMine.addEventListener('click', toggleMine);
+//document.getElementById('switch-label-mine').addEventListener('click', toggleMine);
 mineSelect.addEventListener('change', e => {
   const id = Number(e.target.value);
   mySsDirIds = id ? new Set([id]) : new Set();
@@ -3197,31 +3143,48 @@ function positionGear(){
 }
 new ResizeObserver(positionGear).observe(document.getElementById('table-wrap'));
 window.addEventListener('resize', positionGear);
+
+// Filtre sous-direction : vide = tout afficher
+let lastSsDirOption = null;
+function setSsDirFilter(id){
+  mySsDirIds = id ? new Set([id]) : new Set();
+  myFilter = mySsDirIds.size > 0;
+  fillMySsDirSelect();
+  updateFilteringClass();
+  if (allRecords.length) render();
+  document.getElementById('table-wrap').scrollTop = 0;
+}
+document.getElementById('my-ssdir-select').addEventListener('change', e => {
+  const id = Number(e.target.value) || 0;
+  lastSsDirOption = id;
+  setSsDirFilter(id);
+  grist.setOption('ssDirId', id); // enregistré dans le widget, donc partagé
+});
 // ---------- Initialisation Grist ----------
 grist.ready({
   requiredAccess: 'full',
   onEditOptions: () => {
-    document.getElementById('opt-filtre-ssdir').checked = lastFiltreOption === true;
+    //document.getElementById('opt-filtre-ssdir').checked = lastFiltreOption === true;
     document.getElementById('opt-overlay').style.display = 'flex';
   },
 });
 let lastFiltreOption = null;
 grist.onOptions(options => {
-  const v = !!(options && options.filtreSsDir);
-  if (v === lastFiltreOption) return;   // ne réagit qu'à un vrai changement de l'option
-  lastFiltreOption = v;
-  if (v !== myFilter) setMyFilter(v);
-  document.querySelector('#switch-mine').closest('.switch-wrap').style.display =
-  (options && options.verrouSsDir) ? 'none' : '';
+  // L'option « verrouSsDir » existante masque désormais le ⚙ (le filtre ne peut plus être changé)
+  document.getElementById('opt-gear').style.display = (options && options.verrouSsDir) ? 'none' : '';
+  const id = Number(options && options.ssDirId) || 0;
+  if (id === lastSsDirOption) return; // ne réagit qu'à un vrai changement
+  lastSsDirOption = id;
+  setSsDirFilter(id);
 });
-document.getElementById('opt-filtre-ssdir').addEventListener('change', e => {
+/*document.getElementById('opt-filtre-ssdir').addEventListener('change', e => {
   grist.setOption('filtreSsDir', e.target.checked); // enregistré dans la vue ; onOptions se déclenche ensuite
-});
+});*/
 document.getElementById('opt-close').addEventListener('click', () => {
   document.getElementById('opt-overlay').style.display = 'none';
 });
 document.getElementById('opt-gear').addEventListener('click', () => {
-  document.getElementById('opt-filtre-ssdir').checked = lastFiltreOption === true;
+  //document.getElementById('opt-filtre-ssdir').checked = lastFiltreOption === true;
   document.getElementById('opt-overlay').style.display = 'flex';
 });
 perfLog('script chargé → grist.ready()');
@@ -3265,8 +3228,7 @@ Promise.all([
     return rawRefsFromRecordsOk ? null : refreshAllRefListRawRefs();
   })
   .then(() => { fetchCache.clear(); perfLog(`initialisation terminée (${perfFetchCount} lectures de tables au total) → render final`); if (allRecords.length) render(); })
-  .then(() => detectMySsDir())
-  .then(() => { fillMySsDirSelect(); updateFilteringClass(); if (myFilter) render(); });;
+  .then(() => { fillMySsDirSelect(); updateFilteringClass(); if (myFilter) render(); });
 </script>
 </body>
 </html>
